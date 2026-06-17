@@ -236,6 +236,21 @@
     
     /* Status dots */
     @keyframes dotBlink{0%,100%{opacity:0.35}50%{opacity:1}}
+
+    /* Cybernetic backdrop liquid blur / ripple animation */
+    @keyframes backdropRipple {
+      0%, 100% {
+        filter: saturate(1.3) blur(6px) scale(1);
+      }
+      50% {
+        filter: saturate(1.4) blur(10px) scale(1.03);
+      }
+    }
+    .ripple-canvas {
+      animation: backdropRipple 15s ease-in-out infinite alternate;
+      transform-origin: center;
+      transition: filter 0.5s ease;
+    }
   </style>
 </head>
 <body class="h-full bg-[#030712] text-[#cbd5e1] font-sans antialiased" x-data="app()" x-init="init()" x-cloak>
@@ -245,7 +260,7 @@
 
   <!-- ═ AMBIENT 3D WAREHOUSE BACKDROP ═ -->
   <div class="wh-bg" aria-hidden="true">
-    <canvas id="three-canvas" class="absolute inset-0 w-full h-full z-0" style="pointer-events:none; filter: saturate(1.25) blur(3px); opacity: 0.8;"></canvas>
+    <canvas id="three-canvas" class="absolute inset-0 w-full h-full z-0 ripple-canvas" style="pointer-events:none; opacity: 0.8;"></canvas>
     <!-- Vignette / Gradient transition from WebGL canvas on the left to form on the right -->
     <div class="absolute inset-0 pointer-events-none bg-gradient-to-b lg:bg-gradient-to-r from-transparent via-[#030712]/30 lg:via-[#030712]/40 to-[#030712] z-10"></div>
   </div>
@@ -294,11 +309,7 @@
           </div>
         </div>
 
-        <!-- Telemetry Consent Checkbox -->
-        <div class="flex items-center gap-2.5 pt-1 select-none">
-          <input type="checkbox" id="telemetry-consent" class="rounded w-4 h-4 border-slate-800" checked>
-          <label for="telemetry-consent" class="text-xs text-slate-400 cursor-pointer hover:text-slate-300 transition-colors">Accept automated workspace telemetry monitoring</label>
-        </div>
+
 
         <div x-show="loginForm.error" class="px-4 py-3 rounded-lg text-xs"
              style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#fca5a5"
