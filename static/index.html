@@ -274,17 +274,15 @@
   <div class="w-full lg:w-[38%] min-h-screen flex flex-col justify-between p-8 sm:p-12 md:p-16 bg-[#030712]/92 lg:bg-[#030712] border-t lg:border-t-0 lg:border-l border-slate-800/40 z-20 shadow-2xl relative backdrop-blur-md lg:backdrop-blur-none">
     
     <!-- Top Part: Logo and Brand -->
-    <div class="flex items-center gap-3 select-none mb-10 lg:mb-16">
-      <div class="w-10 h-10 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-xl flex items-center justify-center logo-glow shadow-md">
-        <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 2L2 7v10l10 5 10-5V7L12 2z"/>
-          <circle cx="12" cy="12" r="3.5" fill="#2563eb" stroke="#3b82f6" stroke-width="1.2" class="animate-pulse"/>
-        </svg>
-      </div>
-      <div>
-        <h2 class="text-sm font-extrabold tracking-wider uppercase bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Tychons Forge</h2>
-        <p class="text-blue-500/80 text-[9px] tracking-widest uppercase font-bold">Automation Portal</p>
-      </div>
+    <div class="select-none mb-10 lg:mb-16">
+      <svg viewBox="0 0 160 50" class="w-48 h-15 logo-glow" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- "Tychons" Text -->
+        <text x="8" y="28" font-family="'Inter', 'sans-serif'" font-weight="800" font-size="28" fill="#0062ff" letter-spacing="-0.5">Tychons</text>
+        <!-- Golden swoosh path -->
+        <path d="M 14 31 C 45 40, 75 26, 114 3 C 82 17, 50 31, 14 31 Z" fill="#e5a913" />
+        <!-- Tagline: "People with Technology" -->
+        <text x="10" y="44" font-family="'Inter', 'sans-serif'" font-style="italic" font-weight="600" font-size="9" fill="#ffffff" opacity="0.9">People with Technology</text>
+      </svg>
     </div>
 
     <!-- Center Part: Form and Headings -->
@@ -357,14 +355,15 @@
   <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
          class="fixed lg:static inset-y-0 left-0 w-64 bg-slate-900 flex flex-col z-30 transition-transform duration-200 ease-in-out flex-shrink-0">
 
-    <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-800 flex-shrink-0">
-      <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      </div>
-      <div>
-        <div class="text-white font-semibold text-sm">Tychons Forge</div>
-        <div class="text-slate-500 text-xs">Automation Platform</div>
-      </div>
+    <div class="flex items-center px-4 h-16 border-b border-slate-800 flex-shrink-0">
+      <svg viewBox="0 0 160 50" class="w-36 h-11" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- "Tychons" Text -->
+        <text x="8" y="28" font-family="'Inter', 'sans-serif'" font-weight="800" font-size="28" fill="#3b82f6" letter-spacing="-0.5">Tychons</text>
+        <!-- Golden swoosh path -->
+        <path d="M 14 31 C 45 40, 75 26, 114 3 C 82 17, 50 31, 14 31 Z" fill="#e5a913" />
+        <!-- Tagline: "People with Technology" -->
+        <text x="10" y="44" font-family="'Inter', 'sans-serif'" font-style="italic" font-weight="600" font-size="9" fill="#ffffff" opacity="0.8">People with Technology</text>
+      </svg>
     </div>
 
     <nav class="flex-1 overflow-y-auto py-3 px-3">
