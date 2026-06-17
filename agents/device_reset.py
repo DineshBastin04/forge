@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify, Response
 from flask_login import current_user
 from sqlalchemy import text as _text
 
-from auth import require_agent, admin_required, log_audit_action
+from auth import require_agent, admin_required, superadmin_required, log_audit_action, load_agent_queries, execute_dynamic_query
 from db import get_engine
 from db_config import get_config, load_configs
 from log_buffers import log_device_reset, get_device_reset_logs
@@ -15,6 +15,30 @@ import notify
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("device_reset", __name__)
+
+DEFAULT_QUERIES = {
+    "auto_scan": """
+        SELECT device_id FROM t_log_message
+        WHERE details LIKE '%Data Error%'
+          AND device_id IS NOT NULL AND user_id IS NOT NULL
+          AND logged_on_utc >= DATEADD(HOUR, -2, GETUTCDATE())
+          AND logged_on_utc < GETUTCDATE()
+    """,
+    "find_employee": "SELECT id FROM t_employee WHERE device = :dev",
+    "find_location": "SELECT wh_id, location_id FROM t_location WHERE c1 = :emp",
+    "check_stored_item": "SELECT 1 FROM t_stored_item WHERE location_id = :l AND wh_id = :w",
+    "check_hu_master": "SELECT 1 FROM t_hu_master WHERE location_id = :l AND wh_id = :w",
+    "find_staging": """
+        SELECT TOP 1 tl.location_id FROM t_location tl (NOLOCK)
+        WHERE tl.wh_id = :wh AND (tl.status = 'E' OR tl.status = 'P') AND tl.type = 'S'
+          AND (tl.description LIKE '%STAGE%' OR tl.description LIKE '%STAGING%')
+          AND NOT EXISTS (SELECT 1 FROM t_stored_item si WHERE si.location_id = tl.location_id AND si.wh_id = tl.wh_id)
+          AND NOT EXISTS (SELECT 1 FROM t_hu_master hm WHERE hm.location_id = tl.location_id AND hm.wh_id = tl.wh_id)
+        ORDER BY tl.status ASC, ISNULL(tl.stored_qty, 0) ASC
+    """,
+    "update_employee": "UPDATE t_employee SET device = NULL WHERE id = :id AND wh_id = :wh AND device = :dev",
+    "update_location": "UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = :loc AND wh_id = :wh",
+}
 
 
 # ── Auto job ──────────────────────────────────────────────────────────────────
@@ -50,14 +74,9 @@ def auto_job():
 def _reset_all(config_id, cfg, run_id, executed_by="scheduler"):
     log_cfg = _get_log_cfg(cfg)
     log_engine = get_engine(config_id + "_log" if "log_db" in cfg else config_id, log_cfg)
+    queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
     with log_engine.connect() as conn:
-        rows = conn.execute(_text("""
-            SELECT device_id FROM t_log_message
-            WHERE details LIKE '%Data Error%'
-              AND device_id IS NOT NULL AND user_id IS NOT NULL
-              AND logged_on_utc >= DATEADD(HOUR, -2, GETUTCDATE())
-              AND logged_on_utc < GETUTCDATE()
-        """)).fetchall()
+        rows = execute_dynamic_query(conn, queries["auto_scan"], {}).fetchall()
 
     if not rows:
         log_device_reset("INFO", "No stuck devices found.", run_id=run_id)
@@ -75,11 +94,10 @@ def _reset_all(config_id, cfg, run_id, executed_by="scheduler"):
 
 def _reset_device_engine(engine, device_id, run_id):
     log_device_reset("INFO", f"Processing device {device_id}.", device_id=device_id, run_id=run_id)
+    queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
     try:
         with engine.connect() as conn:
-            emp_row = conn.execute(
-                _text("SELECT id FROM t_employee WHERE device = :dev"), {"dev": device_id}
-            ).fetchone()
+            emp_row = execute_dynamic_query(conn, queries["find_employee"], {"dev": device_id}).fetchone()
         if not emp_row:
             msg = "No employee record found."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
@@ -87,9 +105,7 @@ def _reset_device_engine(engine, device_id, run_id):
         emp_id = emp_row[0]
 
         with engine.connect() as conn:
-            loc_row = conn.execute(
-                _text("SELECT wh_id, location_id FROM t_location WHERE c1 = :emp"), {"emp": emp_id}
-            ).fetchone()
+            loc_row = execute_dynamic_query(conn, queries["find_location"], {"emp": emp_id}).fetchone()
         if not loc_row:
             msg = "No fork location found."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
@@ -98,21 +114,14 @@ def _reset_device_engine(engine, device_id, run_id):
 
         with engine.connect() as conn:
             has_inv = bool(
-                conn.execute(_text("SELECT 1 FROM t_stored_item WHERE location_id = :l AND wh_id = :w"), {"l": fork_loc, "w": wh_id}).fetchone()
-                or conn.execute(_text("SELECT 1 FROM t_hu_master WHERE location_id = :l AND wh_id = :w"), {"l": fork_loc, "w": wh_id}).fetchone()
+                execute_dynamic_query(conn, queries["check_stored_item"], {"l": fork_loc, "w": wh_id}).fetchone()
+                or execute_dynamic_query(conn, queries["check_hu_master"], {"l": fork_loc, "w": wh_id}).fetchone()
             )
 
         temp_loc = None
         if has_inv:
             with engine.connect() as conn:
-                stage = conn.execute(_text("""
-                    SELECT TOP 1 tl.location_id FROM t_location tl (NOLOCK)
-                    WHERE tl.wh_id = :wh AND (tl.status = 'E' OR tl.status = 'P') AND tl.type = 'S'
-                      AND (tl.description LIKE '%STAGE%' OR tl.description LIKE '%STAGING%')
-                      AND NOT EXISTS (SELECT 1 FROM t_stored_item si WHERE si.location_id = tl.location_id AND si.wh_id = tl.wh_id)
-                      AND NOT EXISTS (SELECT 1 FROM t_hu_master hm WHERE hm.location_id = tl.location_id AND hm.wh_id = tl.wh_id)
-                    ORDER BY tl.status ASC, ISNULL(tl.stored_qty, 0) ASC
-                """), {"wh": wh_id}).fetchone()
+                stage = execute_dynamic_query(conn, queries["find_staging"], {"wh": wh_id}).fetchone()
             if not stage:
                 msg = "No available staging location."
                 log_device_reset("ERROR", msg, device_id=device_id, run_id=run_id)
@@ -124,10 +133,8 @@ def _reset_device_engine(engine, device_id, run_id):
                 for tbl in ("t_stored_item", "t_hu_master", "t_hu_detail"):
                     conn.execute(_text(f"UPDATE {tbl} SET location_id = :new WHERE location_id = :old AND wh_id = :wh"),
                                  {"new": temp_loc, "old": fork_loc, "wh": wh_id})
-            conn.execute(_text("UPDATE t_employee SET device = NULL WHERE id = :id AND wh_id = :wh AND device = :dev"),
-                         {"id": emp_id, "wh": wh_id, "dev": device_id})
-            conn.execute(_text("UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = :loc AND wh_id = :wh"),
-                         {"loc": fork_loc, "wh": wh_id})
+            execute_dynamic_query(conn, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": device_id})
+            execute_dynamic_query(conn, queries["update_location"], {"loc": fork_loc, "wh": wh_id})
 
         msg = f"Device {device_id} reset complete."
         log_device_reset("INFO", msg, device_id=device_id, run_id=run_id)
@@ -211,9 +218,9 @@ def manual_reset():
         conn.autocommit = False
         cursor = conn.cursor()
         steps = []
+        queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
 
-        cursor.execute("SELECT id FROM t_employee WHERE device = ?", (device_id,))
-        emp_row = cursor.fetchone()
+        emp_row = execute_dynamic_query(cursor, queries["find_employee"], {"dev": device_id}).fetchone()
         if not emp_row:
             msg = f"No employee record for device {device_id}."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
@@ -222,8 +229,7 @@ def manual_reset():
         emp_id = emp_row[0]
         steps.append("Employee record found.")
 
-        cursor.execute("SELECT wh_id, location_id FROM t_location WHERE c1 = ?", (emp_id,))
-        loc_row = cursor.fetchone()
+        loc_row = execute_dynamic_query(cursor, queries["find_location"], {"emp": emp_id}).fetchone()
         if not loc_row:
             msg = "No fork location found."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
@@ -232,24 +238,15 @@ def manual_reset():
         wh_id, fork_loc = loc_row[0], loc_row[1]
         steps.append(f"Fork location: {fork_loc}, WH: {wh_id}.")
 
-        cursor.execute("SELECT 1 FROM t_stored_item WHERE location_id = ? AND wh_id = ?", (fork_loc, wh_id))
-        has_inv = bool(cursor.fetchone())
-        if not has_inv:
-            cursor.execute("SELECT 1 FROM t_hu_master WHERE location_id = ? AND wh_id = ?", (fork_loc, wh_id))
-            has_inv = bool(cursor.fetchone())
+        has_inv = bool(
+            execute_dynamic_query(cursor, queries["check_stored_item"], {"l": fork_loc, "w": wh_id}).fetchone()
+            or execute_dynamic_query(cursor, queries["check_hu_master"], {"l": fork_loc, "w": wh_id}).fetchone()
+        )
         steps.append(f"Inventory at fork: {has_inv}.")
 
         temp_loc = None
         if has_inv:
-            cursor.execute("""
-                SELECT TOP 1 tl.location_id FROM t_location tl (NOLOCK)
-                WHERE tl.wh_id = ? AND (tl.status = 'E' OR tl.status = 'P') AND tl.type = 'S'
-                  AND (tl.description LIKE '%STAGE%' OR tl.description LIKE '%STAGING%')
-                  AND NOT EXISTS (SELECT 1 FROM t_stored_item si WHERE si.location_id = tl.location_id AND si.wh_id = tl.wh_id)
-                  AND NOT EXISTS (SELECT 1 FROM t_hu_master hm WHERE hm.location_id = tl.location_id AND hm.wh_id = tl.wh_id)
-                ORDER BY tl.status ASC, ISNULL(tl.stored_qty, 0) ASC
-            """, (wh_id,))
-            stage_row = cursor.fetchone()
+            stage_row = execute_dynamic_query(cursor, queries["find_staging"], {"wh": wh_id}).fetchone()
             if not stage_row:
                 msg = "No available staging location found."
                 log_device_reset("ERROR", msg, device_id=device_id, run_id=run_id)
@@ -263,8 +260,8 @@ def manual_reset():
                 cursor.execute(f"UPDATE {tbl} SET location_id = ? WHERE location_id = ? AND wh_id = ?",
                                (temp_loc, fork_loc, wh_id))
             steps.append(f"Inventory relocated to {temp_loc}.")
-        cursor.execute("UPDATE t_employee SET device = NULL WHERE id = ? AND device = ?", (emp_id, device_id))
-        cursor.execute("UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = ? AND wh_id = ?", (fork_loc, wh_id))
+        execute_dynamic_query(cursor, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": device_id})
+        execute_dynamic_query(cursor, queries["update_location"], {"loc": fork_loc, "wh": wh_id})
         steps.append("Device assignment cleared. Fork location reset.")
 
         conn.commit(); cursor.close()

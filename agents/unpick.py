@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify, Response
 from flask_login import current_user
 from sqlalchemy import text as _text
 
-from auth import require_agent, admin_required, log_audit_action
+from auth import require_agent, admin_required, superadmin_required, log_audit_action, load_agent_queries, execute_dynamic_query
 from db import get_engine, pyodbc_connect
 from db_config import get_config, load_configs
 from log_buffers import log_unpick, get_unpick_logs
@@ -47,6 +47,95 @@ _AUTO_UNPICK_SQL = """
         OR HD.storage_type IS NOT NULL OR WQ.work_status <> 'U')
 """
 
+DEFAULT_QUERIES = {
+    "auto_scan": _AUTO_UNPICK_SQL,
+    "find_picked_qty": "SELECT picked_quantity FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i",
+    "check_columns": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('t_pick_detail') AND name = 'pick_location'",
+    "find_pick_loc": "SELECT pick_location FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i",
+    "find_tran_loc_301": "SELECT TOP 1 location_id FROM t_tran_log WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o ORDER BY start_tran_date DESC, start_tran_time DESC",
+    "find_tran_source_loc_301": "SELECT TOP 1 source_location_id FROM t_tran_log WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o ORDER BY start_tran_date DESC, start_tran_time DESC",
+    "update_pick_detail": """
+        UPDATE t_pick_detail
+        SET staged_quantity = CASE WHEN staged_quantity >= :q THEN staged_quantity - :q ELSE 0 END,
+            picked_quantity = picked_quantity - :q,
+            status = CASE WHEN picked_quantity - :q > 0 THEN 'PICKED' ELSE 'RELEASED' END
+        WHERE wh_id = :w AND order_number = :o AND item_number = :i
+    """,
+    "check_item_indicator": "SELECT item_hu_indicator FROM t_location WHERE wh_id = :w AND location_id = :l",
+    "check_stored_item": "SELECT 1 FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l",
+    "update_stored_qty_add": "UPDATE t_stored_item SET actual_qty = actual_qty + :q WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l",
+    "update_stored_qty_move": "UPDATE t_stored_item SET type = 'STORAGE', location_id = :l, actual_qty = :q WHERE wh_id = :w AND item_number = :i AND type = :o",
+    "update_stored_qty_sub": "UPDATE t_stored_item SET actual_qty = actual_qty - :q WHERE wh_id = :w AND item_number = :i AND type = :o",
+    "delete_empty_stored_item": "DELETE FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = :o AND actual_qty <= 0",
+    "find_hu_id": "SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = :w AND item_number = :i AND storage_type = :o",
+    "update_hu_qty_sub": "UPDATE t_hu_detail SET actual_qty = actual_qty - :q WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o",
+    "delete_empty_hu_detail": "DELETE FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o AND actual_qty <= 0",
+    "check_hu_detail": "SELECT 1 FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h",
+    "delete_empty_hu_master": "DELETE FROM t_hu_master WHERE wh_id = :w AND hu_id = :h",
+    "update_work_q": """
+        UPDATE t_work_q SET work_status = CASE
+            WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id
+                         AND pd.picked_quantity >= pd.planned_quantity) THEN 'C' ELSE 'U' END
+        WHERE wh_id = :w AND pick_ref_number = :o
+          AND work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :o AND wh_id = :w AND item_number = :i)
+    """,
+    "manual_unpick_update_pick": """
+        UPDATE t_pick_detail
+        SET staged_quantity = 0,
+            picked_quantity = 0,
+            status = 'RELEASED'
+        WHERE order_number = :o
+          AND wh_id = :w
+          AND item_number = :i
+    """,
+    "manual_update_stored_qty_add": """
+        UPDATE S
+           SET S.actual_qty = S.actual_qty + O.actual_qty
+        FROM t_stored_item S
+        JOIN t_stored_item O
+          ON O.wh_id = S.wh_id
+         AND O.item_number = S.item_number
+        WHERE S.wh_id = :w
+          AND S.item_number = :i
+          AND S.type = 'STORAGE'
+          AND S.location_id = :l
+          AND O.type = :o
+    """,
+    "manual_delete_stored_item": "DELETE FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = :o",
+    "manual_update_stored_item_move": """
+        UPDATE t_stored_item
+        SET type = 'STORAGE',
+            location_id = :l
+        WHERE wh_id = :w AND item_number = :i AND type = :o
+    """,
+    "manual_delete_hu_detail": "DELETE FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o",
+    "manual_get_distinct_item_count": "SELECT COUNT(DISTINCT item_number) FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h",
+    "manual_insert_hu_master": "INSERT INTO t_hu_master (hu_id, type, control_number, location_id, status, wh_id) VALUES (:h, 'LP', NULL, :l, 'A', :w)",
+    "manual_update_hu_detail_multi": """
+        UPDATE t_hu_detail
+        SET hu_id = :nh,
+            location_id = :l,
+            storage_type = NULL
+        WHERE wh_id = :w
+          AND hu_id = :oh
+          AND item_number = :i
+    """,
+    "manual_update_work_q": """
+        UPDATE t_work_q
+        SET work_status = 'U'
+        WHERE pick_ref_number = :o
+          AND wh_id = :w
+          AND work_q_id IN
+        (
+            SELECT work_q_id
+            FROM t_pick_detail
+            WHERE order_number = :o
+              AND wh_id = :w
+              AND item_number = :i
+        )
+    """,
+}
+
 
 # ── Auto job ──────────────────────────────────────────────────────────────────
 
@@ -71,8 +160,9 @@ def auto_job():
 
 def _run_auto(config_id, cfg, run_id):
     engine = get_engine(config_id, cfg)
+    queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     with engine.connect() as conn:
-        rows = conn.execute(_text(_AUTO_UNPICK_SQL)).fetchall()
+        rows = execute_dynamic_query(conn, queries["auto_scan"], {}).fetchall()
 
     if not rows:
         log_unpick("INFO", "No dirty unpick records found.", run_id=run_id)
@@ -89,28 +179,16 @@ def _run_auto(config_id, cfg, run_id):
 
 # ── Shared unpick logic (SQLAlchemy engine) ───────────────────────────────────
 
-def _resolve_pick_loc_conn(conn, wh_id, order_number, item_number):
-    col = conn.execute(_text(
-        "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('t_pick_detail') AND name = 'pick_location'"
-    )).fetchone()
-    if col:
-        row = conn.execute(_text(
-            "SELECT pick_location FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i"
-        ), {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+def _resolve_pick_loc_conn(conn, wh_id, order_number, item_number, queries):
+    row = execute_dynamic_query(conn, queries["check_columns"], {}).fetchone()
+    if row:
+        row = execute_dynamic_query(conn, queries["find_pick_loc"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
         loc = row[0] if row else None
         if not loc:
-            row2 = conn.execute(_text(
-                "SELECT TOP 1 location_id FROM t_tran_log"
-                " WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o"
-                " ORDER BY start_tran_date DESC, start_tran_time DESC"
-            ), {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
+            row2 = execute_dynamic_query(conn, queries["find_tran_loc_301"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
             loc = row2[0] if row2 else None
     else:
-        row = conn.execute(_text(
-            "SELECT TOP 1 source_location_id FROM t_tran_log"
-            " WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o"
-            " ORDER BY start_tran_date DESC, start_tran_time DESC"
-        ), {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
+        row = execute_dynamic_query(conn, queries["find_tran_source_loc_301"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
         loc = row[0] if row else None
     return loc
 
@@ -118,11 +196,10 @@ def _resolve_pick_loc_conn(conn, wh_id, order_number, item_number):
 def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None):
     """Full or partial unpick using a SQLAlchemy engine."""
     log_unpick("INFO", "Processing started.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+    queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
         with engine.begin() as conn:
-            qty_row = conn.execute(_text(
-                "SELECT picked_quantity FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i"
-            ), {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+            qty_row = execute_dynamic_query(conn, queries["find_picked_qty"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
             if not qty_row or not qty_row[0] or float(qty_row[0]) <= 0:
                 msg = "picked_quantity is 0 or NULL — skipping."
                 log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
@@ -135,60 +212,37 @@ def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None
                 log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 return {"status": "WARNING", "message": msg}
 
-            pick_loc = _resolve_pick_loc_conn(conn, wh_id, order_number, item_number)
+            pick_loc = _resolve_pick_loc_conn(conn, wh_id, order_number, item_number, queries)
             if not pick_loc:
                 msg = "Could not resolve pick_location — skipping."
                 log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 return {"status": "WARNING", "message": msg}
 
-            conn.execute(_text("""
-                UPDATE t_pick_detail
-                SET staged_quantity = CASE WHEN staged_quantity >= :q THEN staged_quantity - :q ELSE 0 END,
-                    picked_quantity = picked_quantity - :q,
-                    status = CASE WHEN picked_quantity - :q > 0 THEN 'PICKED' ELSE 'RELEASED' END
-                WHERE wh_id = :w AND order_number = :o AND item_number = :i
-            """), {"q": q, "w": wh_id, "o": order_number, "i": item_number})
+            execute_dynamic_query(conn, queries["update_pick_detail"], {"q": q, "w": wh_id, "o": order_number, "i": item_number})
 
-            loc_row = conn.execute(_text(
-                "SELECT item_hu_indicator FROM t_location WHERE wh_id = :w AND location_id = :l"
-            ), {"w": wh_id, "l": pick_loc}).fetchone()
+            loc_row = execute_dynamic_query(conn, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
             ihi = loc_row[0] if loc_row else None
 
             if ihi in ('I', 'H'):
-                si = conn.execute(_text(
-                    "SELECT 1 FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l"
-                ), {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
+                si = execute_dynamic_query(conn, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
                 if si:
-                    conn.execute(_text("UPDATE t_stored_item SET actual_qty = actual_qty + :q WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l"),
-                                 {"q": q, "w": wh_id, "i": item_number, "l": pick_loc})
+                    execute_dynamic_query(conn, queries["update_stored_qty_add"], {"q": q, "w": wh_id, "i": item_number, "l": pick_loc})
                 else:
-                    conn.execute(_text("UPDATE t_stored_item SET type = 'STORAGE', location_id = :l, actual_qty = :q WHERE wh_id = :w AND item_number = :i AND type = :o"),
-                                 {"l": pick_loc, "q": q, "w": wh_id, "i": item_number, "o": order_number})
-                conn.execute(_text("UPDATE t_stored_item SET actual_qty = actual_qty - :q WHERE wh_id = :w AND item_number = :i AND type = :o"),
-                             {"q": q, "w": wh_id, "i": item_number, "o": order_number})
-                conn.execute(_text("DELETE FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = :o AND actual_qty <= 0"),
-                             {"w": wh_id, "i": item_number, "o": order_number})
-                hu_row = conn.execute(_text("SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = :w AND item_number = :i AND storage_type = :o"),
-                                      {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
+                    execute_dynamic_query(conn, queries["update_stored_qty_move"], {"l": pick_loc, "q": q, "w": wh_id, "i": item_number, "o": order_number})
+                execute_dynamic_query(conn, queries["update_stored_qty_sub"], {"q": q, "w": wh_id, "i": item_number, "o": order_number})
+                execute_dynamic_query(conn, queries["delete_empty_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+                hu_row = execute_dynamic_query(conn, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
                 if hu_row:
                     h = hu_row[0]
-                    conn.execute(_text("UPDATE t_hu_detail SET actual_qty = actual_qty - :q WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o"),
-                                 {"q": q, "w": wh_id, "h": h, "i": item_number, "o": order_number})
-                    conn.execute(_text("DELETE FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o AND actual_qty <= 0"),
-                                 {"w": wh_id, "h": h, "i": item_number, "o": order_number})
-                    if not conn.execute(_text("SELECT 1 FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h"), {"w": wh_id, "h": h}).fetchone():
-                        conn.execute(_text("DELETE FROM t_hu_master WHERE wh_id = :w AND hu_id = :h"), {"w": wh_id, "h": h})
+                    execute_dynamic_query(conn, queries["update_hu_qty_sub"], {"q": q, "w": wh_id, "h": h, "i": item_number, "o": order_number})
+                    execute_dynamic_query(conn, queries["delete_empty_hu_detail"], {"w": wh_id, "h": h, "i": item_number, "o": order_number})
+                    if not execute_dynamic_query(conn, queries["check_hu_detail"], {"w": wh_id, "h": h}).fetchone():
+                        execute_dynamic_query(conn, queries["delete_empty_hu_master"], {"w": wh_id, "h": h})
             else:
                 log_unpick("WARNING", f"Unknown item_hu_indicator '{ihi}' — skipping HU cleanup.",
                            order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
-            conn.execute(_text("""
-                UPDATE t_work_q SET work_status = CASE
-                    WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id
-                                 AND pd.picked_quantity >= pd.planned_quantity) THEN 'C' ELSE 'U' END
-                WHERE wh_id = :w AND pick_ref_number = :o
-                  AND work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :o AND wh_id = :w AND item_number = :i)
-            """), {"w": wh_id, "o": order_number, "i": item_number})
+            execute_dynamic_query(conn, queries["update_work_q"], {"w": wh_id, "o": order_number, "i": item_number})
 
         log_unpick("INFO", "All steps committed.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         return {"status": "SUCCESS", "message": "Unpick completed."}
@@ -202,30 +256,26 @@ def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None
 
 # ── Shared unpick logic (pyodbc cursor) ──────────────────────────────────────
 
-def _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number):
-    cursor.execute("SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('t_pick_detail') AND name = 'pick_location'")
+def _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries):
+    execute_dynamic_query(cursor, queries["check_columns"], {})
     if cursor.fetchone():
-        cursor.execute("SELECT pick_location FROM t_pick_detail WHERE wh_id = ? AND order_number = ? AND item_number = ?",
-                       (wh_id, order_number, item_number))
-        row = cursor.fetchone(); loc = row[0] if row else None
+        row = execute_dynamic_query(cursor, queries["find_pick_loc"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+        loc = row[0] if row else None
         if not loc:
-            cursor.execute("SELECT TOP 1 location_id FROM t_tran_log WHERE wh_id = ? AND tran_type = '301' AND item_number = ? AND control_number = ? ORDER BY start_tran_date DESC, start_tran_time DESC",
-                           (wh_id, item_number, order_number))
-            row2 = cursor.fetchone(); loc = row2[0] if row2 else None
+            row2 = execute_dynamic_query(cursor, queries["find_tran_loc_301"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+            loc = row2[0] if row2 else None
     else:
-        cursor.execute("SELECT TOP 1 source_location_id FROM t_tran_log WHERE wh_id = ? AND tran_type = '301' AND item_number = ? AND control_number = ? ORDER BY start_tran_date DESC, start_tran_time DESC",
-                       (wh_id, item_number, order_number))
-        row = cursor.fetchone(); loc = row[0] if row else None
+        row = execute_dynamic_query(cursor, queries["find_tran_source_loc_301"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+        loc = row[0] if row else None
     return loc
 
 
 def _do_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id, qty=None):
     """Full or partial unpick using a pyodbc connection."""
     cursor = conn.cursor()
+    queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
-        cursor.execute("SELECT picked_quantity FROM t_pick_detail WHERE wh_id = ? AND order_number = ? AND item_number = ?",
-                       (wh_id, order_number, item_number))
-        qty_row = cursor.fetchone()
+        qty_row = execute_dynamic_query(cursor, queries["find_picked_qty"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
         if not qty_row or not qty_row[0] or float(qty_row[0]) <= 0:
             msg = "picked_quantity is 0 or NULL — nothing to unpick."
             log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
@@ -240,62 +290,40 @@ def _do_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id, qty=None):
             conn.rollback()
             return {"status": "WARNING", "message": msg}
 
-        pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number)
+        pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries)
         if not pick_loc:
             msg = "Could not resolve pick_location — skipping."
             log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             conn.rollback()
             return {"status": "WARNING", "message": msg}
 
-        cursor.execute("""
-            UPDATE t_pick_detail SET
-                staged_quantity = CASE WHEN staged_quantity >= ? THEN staged_quantity - ? ELSE 0 END,
-                picked_quantity = picked_quantity - ?,
-                status = CASE WHEN picked_quantity - ? > 0 THEN 'PICKED' ELSE 'RELEASED' END
-            WHERE wh_id = ? AND order_number = ? AND item_number = ?
-        """, (q, q, q, q, wh_id, order_number, item_number))
+        execute_dynamic_query(cursor, queries["update_pick_detail"], {"q": q, "w": wh_id, "o": order_number, "i": item_number})
         log_unpick("INFO", f"Step 1: {cursor.rowcount} row(s) updated.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
-        cursor.execute("SELECT item_hu_indicator FROM t_location WHERE wh_id = ? AND location_id = ?", (wh_id, pick_loc))
-        row = cursor.fetchone(); ihi = row[0] if row else None
+        loc_row = execute_dynamic_query(cursor, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
+        ihi = loc_row[0] if loc_row else None
 
         if ihi in ('I', 'H'):
-            cursor.execute("SELECT 1 FROM t_stored_item WHERE wh_id = ? AND item_number = ? AND type = 'STORAGE' AND location_id = ?",
-                           (wh_id, item_number, pick_loc))
-            if cursor.fetchone():
-                cursor.execute("UPDATE t_stored_item SET actual_qty = actual_qty + ? WHERE wh_id = ? AND item_number = ? AND type = 'STORAGE' AND location_id = ?",
-                               (q, wh_id, item_number, pick_loc))
+            si = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
+            if si:
+                execute_dynamic_query(cursor, queries["update_stored_qty_add"], {"q": q, "w": wh_id, "i": item_number, "l": pick_loc})
             else:
-                cursor.execute("UPDATE t_stored_item SET type = 'STORAGE', location_id = ?, actual_qty = ? WHERE wh_id = ? AND item_number = ? AND type = ?",
-                               (pick_loc, q, wh_id, item_number, order_number))
-            cursor.execute("UPDATE t_stored_item SET actual_qty = actual_qty - ? WHERE wh_id = ? AND item_number = ? AND type = ?",
-                           (q, wh_id, item_number, order_number))
-            cursor.execute("DELETE FROM t_stored_item WHERE wh_id = ? AND item_number = ? AND type = ? AND actual_qty <= 0",
-                           (wh_id, item_number, order_number))
-            cursor.execute("SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = ? AND item_number = ? AND storage_type = ?",
-                           (wh_id, item_number, order_number))
-            hu = cursor.fetchone()
-            if hu:
-                h = hu[0]
-                cursor.execute("UPDATE t_hu_detail SET actual_qty = actual_qty - ? WHERE wh_id = ? AND hu_id = ? AND item_number = ? AND storage_type = ?",
-                               (q, wh_id, h, item_number, order_number))
-                cursor.execute("DELETE FROM t_hu_detail WHERE wh_id = ? AND hu_id = ? AND item_number = ? AND storage_type = ? AND actual_qty <= 0",
-                               (wh_id, h, item_number, order_number))
-                cursor.execute("SELECT 1 FROM t_hu_detail WHERE wh_id = ? AND hu_id = ?", (wh_id, h))
-                if not cursor.fetchone():
-                    cursor.execute("DELETE FROM t_hu_master WHERE wh_id = ? AND hu_id = ?", (wh_id, h))
+                execute_dynamic_query(cursor, queries["update_stored_qty_move"], {"l": pick_loc, "q": q, "w": wh_id, "i": item_number, "o": order_number})
+            execute_dynamic_query(cursor, queries["update_stored_qty_sub"], {"q": q, "w": wh_id, "i": item_number, "o": order_number})
+            execute_dynamic_query(cursor, queries["delete_empty_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+            hu_row = execute_dynamic_query(cursor, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
+            if hu_row:
+                h = hu_row[0]
+                execute_dynamic_query(cursor, queries["update_hu_qty_sub"], {"q": q, "w": wh_id, "h": h, "i": item_number, "o": order_number})
+                execute_dynamic_query(cursor, queries["delete_empty_hu_detail"], {"w": wh_id, "h": h, "i": item_number, "o": order_number})
+                if not execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": h}).fetchone():
+                    execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": h})
             log_unpick("INFO", f"Step 2 (Case {ihi}): Done.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         else:
             log_unpick("WARNING", f"Unknown indicator '{ihi}' — skipping HU.",
                        order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
-        cursor.execute("""
-            UPDATE t_work_q SET work_status = CASE
-                WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id
-                             AND pd.picked_quantity >= pd.planned_quantity) THEN 'C' ELSE 'U' END
-            WHERE wh_id = ? AND pick_ref_number = ?
-              AND work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = ? AND wh_id = ? AND item_number = ?)
-        """, (wh_id, order_number, order_number, wh_id, item_number))
+        execute_dynamic_query(cursor, queries["update_work_q"], {"w": wh_id, "o": order_number, "i": item_number})
         log_unpick("INFO", f"Step 3: {cursor.rowcount} row(s) updated.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
         conn.commit(); cursor.close()
@@ -375,7 +403,8 @@ def auto_scan():
         conn = get_engine(db_config_id, cfg).raw_connection()
         conn.autocommit = False
         cursor = conn.cursor()
-        cursor.execute(_AUTO_UNPICK_SQL)
+        queries = load_agent_queries("unpick", DEFAULT_QUERIES)
+        execute_dynamic_query(cursor, queries["auto_scan"], {})
         columns = [col[0] for col in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
         cursor.close()
@@ -451,22 +480,15 @@ def execute():
 def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
     """Full manual unpick using a pyodbc connection following the exact 3-step SQL flow."""
     cursor = conn.cursor()
+    queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
         # STEP 1: UNSTAGE & UNPICK
-        cursor.execute("""
-            UPDATE t_pick_detail
-            SET staged_quantity = 0,
-                picked_quantity = 0,
-                status = 'RELEASED'
-            WHERE order_number = ?
-              AND wh_id = ?
-              AND item_number = ?
-        """, (order_number, wh_id, item_number))
+        execute_dynamic_query(cursor, queries["manual_unpick_update_pick"], {"o": order_number, "w": wh_id, "i": item_number})
         log_unpick("INFO", f"Step 1: Unstage & Unpick. Updated {cursor.rowcount} row(s) in t_pick_detail.",
                    order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
         # STEP 2: RESOLVE PICK LOCATION
-        pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number)
+        pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries)
         if not pick_loc:
             msg = "Could not resolve pick_location."
             log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
@@ -474,133 +496,63 @@ def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
             return {"status": "WARNING", "message": msg}
 
         # GET ITEM HU INDICATOR
-        cursor.execute("SELECT item_hu_indicator FROM t_location WHERE wh_id = ? AND location_id = ?", (wh_id, pick_loc))
-        row = cursor.fetchone()
+        row = execute_dynamic_query(cursor, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
         ihi = row[0] if row else None
 
         if ihi == 'I':
             # GET PICKED HU ID
-            cursor.execute("""
-                SELECT TOP 1 hu_id FROM t_hu_detail
-                WHERE wh_id = ? AND item_number = ? AND storage_type = ?
-            """, (wh_id, item_number, order_number))
-            row = cursor.fetchone()
+            row = execute_dynamic_query(cursor, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
             picked_hu_id = row[0] if row else None
 
             # CHECK IF STORED ITEM STORAGE RECORD EXISTS AT PICK LOCATION
-            cursor.execute("""
-                SELECT 1 FROM t_stored_item
-                WHERE wh_id = ? AND item_number = ? AND type = 'STORAGE' AND location_id = ?
-            """, (wh_id, item_number, pick_loc))
-            exists_stored = cursor.fetchone()
+            exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
 
             if exists_stored:
-                cursor.execute("""
-                    UPDATE S
-                       SET S.actual_qty = S.actual_qty + O.actual_qty
-                    FROM t_stored_item S
-                    JOIN t_stored_item O
-                      ON O.wh_id = S.wh_id
-                     AND O.item_number = S.item_number
-                    WHERE S.wh_id = ?
-                      AND S.item_number = ?
-                      AND S.type = 'STORAGE'
-                      AND S.location_id = ?
-                      AND O.type = ?
-                """, (wh_id, item_number, pick_loc, order_number))
-
-                cursor.execute("""
-                    DELETE FROM t_stored_item
-                    WHERE wh_id = ? AND item_number = ? AND type = ?
-                """, (wh_id, item_number, order_number))
+                execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
+                execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
             else:
-                cursor.execute("""
-                    UPDATE t_stored_item
-                    SET type = 'STORAGE',
-                        location_id = ?
-                    WHERE wh_id = ? AND item_number = ? AND type = ?
-                """, (pick_loc, wh_id, item_number, order_number))
+                execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
 
             # DELETE FROM HU DETAIL
             if picked_hu_id:
-                cursor.execute("""
-                    DELETE FROM t_hu_detail
-                    WHERE wh_id = ? AND hu_id = ? AND item_number = ? AND storage_type = ?
-                """, (wh_id, picked_hu_id, item_number, order_number))
+                execute_dynamic_query(cursor, queries["manual_delete_hu_detail"], {"w": wh_id, "h": picked_hu_id, "i": item_number, "o": order_number})
 
                 # DELETE FROM HU MASTER IF EMPTY
-                cursor.execute("SELECT 1 FROM t_hu_detail WHERE wh_id = ? AND hu_id = ?", (wh_id, picked_hu_id))
-                if not cursor.fetchone():
-                    cursor.execute("DELETE FROM t_hu_master WHERE wh_id = ? AND hu_id = ?", (wh_id, picked_hu_id))
+                row = execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": picked_hu_id}).fetchone()
+                if not row:
+                    execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": picked_hu_id})
 
             log_unpick("INFO", f"Step 2 (Case I): Inventory restored to location {pick_loc}.",
                        order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
         elif ihi == 'H':
             # GET PICKED HU ID
-            cursor.execute("""
-                SELECT TOP 1 hu_id FROM t_hu_detail
-                WHERE wh_id = ? AND item_number = ? AND storage_type = ?
-            """, (wh_id, item_number, order_number))
-            row = cursor.fetchone()
+            row = execute_dynamic_query(cursor, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
             picked_hu_id = row[0] if row else None
 
             # GET DISTINCT ITEM COUNT
             item_count = 0
             if picked_hu_id:
-                cursor.execute("""
-                    SELECT COUNT(DISTINCT item_number)
-                    FROM t_hu_detail
-                    WHERE wh_id = ? AND hu_id = ?
-                """, (wh_id, picked_hu_id))
-                row = cursor.fetchone()
+                row = execute_dynamic_query(cursor, queries["manual_get_distinct_item_count"], {"w": wh_id, "h": picked_hu_id}).fetchone()
                 item_count = row[0] if row else 0
 
             if item_count == 1:
                 # SINGLE ITEM LP
-                cursor.execute("""
-                    DELETE FROM t_hu_detail
-                    WHERE wh_id = ? AND hu_id = ? AND item_number = ? AND storage_type = ?
-                """, (wh_id, picked_hu_id, item_number, order_number))
+                execute_dynamic_query(cursor, queries["manual_delete_hu_detail"], {"w": wh_id, "h": picked_hu_id, "i": item_number, "o": order_number})
 
                 # DELETE FROM HU MASTER IF EMPTY
-                cursor.execute("SELECT 1 FROM t_hu_detail WHERE wh_id = ? AND hu_id = ?", (wh_id, picked_hu_id))
-                if not cursor.fetchone():
-                    cursor.execute("DELETE FROM t_hu_master WHERE wh_id = ? AND hu_id = ?", (wh_id, picked_hu_id))
+                row = execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": picked_hu_id}).fetchone()
+                if not row:
+                    execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": picked_hu_id})
 
                 # RESTORE STORED ITEM
-                cursor.execute("""
-                    SELECT 1 FROM t_stored_item
-                    WHERE wh_id = ? AND item_number = ? AND type = 'STORAGE' AND location_id = ?
-                """, (wh_id, item_number, pick_loc))
-                exists_stored = cursor.fetchone()
+                exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
 
                 if exists_stored:
-                    cursor.execute("""
-                        UPDATE S
-                           SET S.actual_qty = S.actual_qty + O.actual_qty
-                        FROM t_stored_item S
-                        JOIN t_stored_item O
-                          ON O.wh_id = S.wh_id
-                         AND O.item_number = S.item_number
-                        WHERE S.wh_id = ?
-                          AND S.item_number = ?
-                          AND S.type = 'STORAGE'
-                          AND S.location_id = ?
-                          AND O.type = ?
-                    """, (wh_id, item_number, pick_loc, order_number))
-
-                    cursor.execute("""
-                        DELETE FROM t_stored_item
-                        WHERE wh_id = ? AND item_number = ? AND type = ?
-                    """, (wh_id, item_number, order_number))
+                    execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
+                    execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
                 else:
-                    cursor.execute("""
-                        UPDATE t_stored_item
-                        SET type = 'STORAGE',
-                            location_id = ?
-                        WHERE wh_id = ? AND item_number = ? AND type = ?
-                    """, (pick_loc, wh_id, item_number, order_number))
+                    execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
 
                 log_unpick("INFO", f"Step 2 (Case H - Single Item LP): Inventory restored to location {pick_loc}. LP {picked_hu_id} cleaned up.",
                            order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
@@ -611,54 +563,17 @@ def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
                 rand_num = random.randint(0, 99999999)
                 new_hu_id = f"UP{rand_num:08d}"
 
-                cursor.execute("""
-                    INSERT INTO t_hu_master (hu_id, type, control_number, location_id, status, wh_id)
-                    VALUES (?, 'LP', NULL, ?, 'A', ?)
-                """, (new_hu_id, pick_loc, wh_id))
-
-                cursor.execute("""
-                    UPDATE t_hu_detail
-                    SET hu_id = ?,
-                        location_id = ?,
-                        storage_type = NULL
-                    WHERE wh_id = ?
-                      AND hu_id = ?
-                      AND item_number = ?
-                """, (new_hu_id, pick_loc, wh_id, picked_hu_id, item_number))
+                execute_dynamic_query(cursor, queries["manual_insert_hu_master"], {"h": new_hu_id, "l": pick_loc, "w": wh_id})
+                execute_dynamic_query(cursor, queries["manual_update_hu_detail_multi"], {"nh": new_hu_id, "l": pick_loc, "w": wh_id, "oh": picked_hu_id, "i": item_number})
 
                 # RESTORE STORED ITEM
-                cursor.execute("""
-                    SELECT 1 FROM t_stored_item
-                    WHERE wh_id = ? AND item_number = ? AND type = 'STORAGE' AND location_id = ?
-                """, (wh_id, item_number, pick_loc))
-                exists_stored = cursor.fetchone()
+                exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
 
                 if exists_stored:
-                    cursor.execute("""
-                        UPDATE S
-                           SET S.actual_qty = S.actual_qty + O.actual_qty
-                        FROM t_stored_item S
-                        JOIN t_stored_item O
-                          ON O.wh_id = S.wh_id
-                         AND O.item_number = S.item_number
-                        WHERE S.wh_id = ?
-                          AND S.item_number = ?
-                          AND S.type = 'STORAGE'
-                          AND S.location_id = ?
-                          AND O.type = ?
-                    """, (wh_id, item_number, pick_loc, order_number))
-
-                    cursor.execute("""
-                        DELETE FROM t_stored_item
-                        WHERE wh_id = ? AND item_number = ? AND type = ?
-                    """, (wh_id, item_number, order_number))
+                    execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
+                    execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
                 else:
-                    cursor.execute("""
-                        UPDATE t_stored_item
-                        SET type = 'STORAGE',
-                            location_id = ?
-                        WHERE wh_id = ? AND item_number = ? AND type = ?
-                    """, (pick_loc, wh_id, item_number, order_number))
+                    execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
 
                 log_unpick("INFO", f"Step 2 (Case H - Multi Item LP): Created new LP {new_hu_id} at location {pick_loc}. Restored inventory.",
                            order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
@@ -668,20 +583,7 @@ def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
                        order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
         # STEP 3: UPDATE WORK QUEUE
-        cursor.execute("""
-            UPDATE t_work_q
-            SET work_status = 'U'
-            WHERE pick_ref_number = ?
-              AND wh_id = ?
-              AND work_q_id IN
-            (
-                SELECT work_q_id
-                FROM t_pick_detail
-                WHERE order_number = ?
-                  AND wh_id = ?
-                  AND item_number = ?
-            )
-        """, (order_number, wh_id, order_number, wh_id, item_number))
+        execute_dynamic_query(cursor, queries["manual_update_work_q"], {"o": order_number, "w": wh_id, "i": item_number})
         log_unpick("INFO", f"Step 3: Update Work Queue. Updated {cursor.rowcount} row(s) in t_work_q.",
                    order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 

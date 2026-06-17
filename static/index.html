@@ -173,31 +173,49 @@
     </div>
 
     <nav class="flex-1 overflow-y-auto py-3 px-3">
-      <template x-if="canSeeDeviceReset() || canSeeUnpick()">
-        <div>
-          <div class="sidebar-section">Agents</div>
-          <template x-if="canSeeDeviceReset()">
-            <button class="sidebar-link" :class="view==='device-reset'&&'active'" @click="nav('device-reset')">
-              <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              <span class="flex-1">Device Reset</span>
-              <span x-show="dr.schedulerInfo" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+      <div>
+        <button class="sidebar-link" :class="view==='dashboard'&&'active'" @click="nav('dashboard')">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          Dashboard
+        </button>
+      </div>
+      <div class="mt-2">
+        <div class="sidebar-section">Agents</div>
+        <template x-for="agent in registeredAgents" :key="agent.id">
+          <template x-if="hasAgentPerm(agent.id) && ['device_reset', 'unpick'].includes(agent.id)">
+            <button class="sidebar-link" :class="view===(agent.id==='device_reset'?'device-reset':agent.id)&&'active'" @click="nav(agent.id==='device_reset'?'device-reset':agent.id)">
+              <svg x-show="agent.id==='device_reset'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <svg x-show="agent.id==='unpick'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span class="flex-1" x-text="agent.name"></span>
+              <template x-if="agent.id==='device_reset'">
+                <span x-show="dr.schedulerInfo" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+              </template>
+              <template x-if="agent.id==='unpick'">
+                <span x-show="up.schedulerInfo" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+              </template>
             </button>
           </template>
-          <template x-if="canSeeUnpick()">
-            <button class="sidebar-link" :class="view==='unpick'&&'active'" @click="nav('unpick')">
-              <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-              <span class="flex-1">Unpick Agent</span>
-              <span x-show="up.schedulerInfo" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
-            </button>
-          </template>
-        </div>
-      </template>
+        </template>
+      </div>
+
+      <div class="mt-4">
+        <div class="sidebar-section">Personal</div>
+        <button class="sidebar-link" :class="view==='my-history'&&'active'" @click="nav('my-history')">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          My History
+        </button>
+      </div>
+
       <template x-if="isAdmin()">
-        <div>
+        <div class="mt-4">
           <div class="sidebar-section">Administration</div>
           <button class="sidebar-link" :class="view==='users'&&'active'" @click="nav('users')">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
             Users
+          </button>
+          <button x-show="isSuperadmin()" class="sidebar-link" :class="view==='agent-workflows'&&'active'" @click="nav('agent-workflows')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            Agent Workflows
           </button>
           <button class="sidebar-link" :class="view==='db-config'&&'active'" @click="nav('db-config')">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
@@ -239,6 +257,84 @@
     </header>
 
     <main class="flex-1 overflow-auto p-4 sm:p-6">
+
+      <!-- ══ DASHBOARD ══ -->
+      <div x-show="view==='dashboard'">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          <!-- Device Reset scheduler card -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
+                  <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <span class="font-semibold text-slate-800 text-sm">Device Reset Agent</span>
+              </div>
+              <span class="badge text-xs" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'" x-text="dr.schedulerInfo?(dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'Running':'Paused'):'Unavailable'"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div class="text-xs text-slate-500 mb-0.5">Interval</div>
+                <div class="font-semibold text-slate-800" x-text="dr.schedulerInfo&&dr.schedulerInfo.interval_hours?dr.schedulerInfo.interval_hours+'h':'—'"></div>
+              </div>
+              <div>
+                <div class="text-xs text-slate-500 mb-0.5">Next Run</div>
+                <div class="font-semibold text-slate-800 text-xs" x-text="dr.schedulerInfo&&dr.schedulerInfo.next_run?relTime(dr.schedulerInfo.next_run):'—'"></div>
+              </div>
+            </div>
+            <div class="mt-3 flex gap-2" x-show="hasAgentPerm('device_reset')">
+              <button class="btn-secondary btn-sm" @click="nav('device-reset')">Open Agent →</button>
+            </div>
+          </div>
+          <!-- Unpick scheduler card -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
+                  <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                </div>
+                <span class="font-semibold text-slate-800 text-sm">Unpick Agent</span>
+              </div>
+              <span class="badge text-xs" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'" x-text="up.schedulerInfo?(up.schedulerInfo.running&&!up.schedulerInfo.paused?'Running':'Paused'):'Unavailable'"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div class="text-xs text-slate-500 mb-0.5">Interval</div>
+                <div class="font-semibold text-slate-800" x-text="up.schedulerInfo&&up.schedulerInfo.interval_hours?up.schedulerInfo.interval_hours+'h':'—'"></div>
+              </div>
+              <div>
+                <div class="text-xs text-slate-500 mb-0.5">Next Run</div>
+                <div class="font-semibold text-slate-800 text-xs" x-text="up.schedulerInfo&&up.schedulerInfo.next_run?relTime(up.schedulerInfo.next_run):'—'"></div>
+              </div>
+            </div>
+            <div class="mt-3 flex gap-2" x-show="hasAgentPerm('unpick')">
+              <button class="btn-secondary btn-sm" @click="nav('unpick')">Open Agent →</button>
+            </div>
+          </div>
+        </div>
+        <!-- Quick actions -->
+        <div class="card">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Quick Actions</div>
+          <div class="flex flex-wrap gap-3">
+            <button x-show="hasAgentPerm('device_reset')" class="btn-secondary" @click="nav('device-reset')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              Device Reset Scan
+            </button>
+            <button x-show="hasAgentPerm('unpick')" class="btn-secondary" @click="nav('unpick')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Unpick Scan
+            </button>
+            <button x-show="isAdmin()" class="btn-secondary" @click="nav('users')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+              Manage Users
+            </button>
+            <button x-show="isAdmin()" class="btn-secondary" @click="nav('audit-logs')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              Audit Logs
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- ══ DEVICE RESET ══ -->
       <div x-show="view==='device-reset'">
@@ -299,12 +395,27 @@
               <tbody><template x-for="(r,i) in dr.scanResults" :key="i"><tr><td class="td"><input type="checkbox" x-model="r._selected" class="rounded"></td><td class="td font-mono text-sm" x-text="r.device_id"></td></tr></template></tbody>
             </table></div>
           </div>
-          <div x-show="dr.execResults.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-200 text-sm font-semibold text-slate-700">Execution Results</div>
-            <div class="overflow-x-auto"><table class="min-w-full">
-              <thead><tr><th class="th">Device ID</th><th class="th">Status</th><th class="th">Message</th></tr></thead>
-              <tbody><template x-for="(r,i) in dr.execResults" :key="i"><tr><td class="td font-mono text-sm" x-text="r.device_id"></td><td class="td"><span class="badge" :class="statusBadge(r.status)" x-text="r.status"></span></td><td class="td text-sm" x-text="r.message"></td></tr></template></tbody>
-            </table></div>
+          <div x-show="dr.execResults.length>0">
+            <div class="flex gap-3 mb-3">
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <span class="text-2xl font-bold text-emerald-700" x-text="dr.execResults.filter(r=>r.status==='SUCCESS').length"></span>
+                <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Success</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <span class="text-2xl font-bold text-amber-700" x-text="dr.execResults.filter(r=>r.status==='WARNING').length"></span>
+                <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Warning</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
+                <span class="text-2xl font-bold text-red-700" x-text="dr.execResults.filter(r=>r.status==='ERROR').length"></span>
+                <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div class="overflow-x-auto"><table class="min-w-full">
+                <thead><tr><th class="th">Device ID</th><th class="th">Status</th><th class="th">Message</th></tr></thead>
+                <tbody><template x-for="(r,i) in dr.execResults" :key="i"><tr><td class="td font-mono text-sm" x-text="r.device_id"></td><td class="td"><span class="badge" :class="statusBadge(r.status)" x-text="r.status"></span></td><td class="td text-sm" x-text="r.message"></td></tr></template></tbody>
+              </table></div>
+            </div>
           </div>
         </div>
 
@@ -346,16 +457,23 @@
             <button class="btn-secondary btn-sm" @click="drLoadLogs()">↻ Refresh</button>
             <button class="btn-secondary btn-sm" @click="drDownloadLogs('csv')">↓ CSV</button>
             <button class="btn-secondary btn-sm" @click="drDownloadLogs('txt')">↓ TXT</button>
-            <span class="text-slate-500 text-sm" x-text="dr.logs.length+' entries'"></span>
+            <select x-model="dr.logLevel" class="select btn-sm w-32 font-normal">
+              <option value="">All levels</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+            <input x-model="dr.logSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search logs…">
+            <span class="text-slate-500 text-sm ml-auto" x-text="filteredDrLogs().length+' / '+dr.logs.length+' entries'"></span>
           </div>
           <div x-show="dr.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>
-          <div x-show="!dr.logsLoading&&dr.logs.length===0" class="card text-slate-500 text-sm">No log entries yet.</div>
-          <div x-show="!dr.logsLoading&&dr.logs.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div x-show="!dr.logsLoading&&filteredDrLogs().length===0" class="card text-slate-500 text-sm">No matching log entries.</div>
+          <div x-show="!dr.logsLoading&&filteredDrLogs().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="overflow-x-auto"><table class="min-w-full">
               <thead><tr><th class="th">Timestamp</th><th class="th">Level</th><th class="th">Device</th><th class="th">Message</th><th class="th">Run ID</th></tr></thead>
               <tbody>
-                <template x-for="(e,i) in dr.logs" :key="i">
-                  <tr><td class="td text-xs text-slate-500 whitespace-nowrap" x-text="e.timestamp"></td><td class="td"><span class="badge" :class="levelBadge(e.level)" x-text="e.level"></span></td><td class="td text-xs font-mono" x-text="e.device_id||'—'"></td><td class="td text-sm" x-text="e.message"></td><td class="td text-xs text-slate-400 whitespace-nowrap" x-text="e.run_id"></td></tr>
+                <template x-for="(e,i) in filteredDrLogs()" :key="i">
+                  <tr><td class="td text-xs text-slate-500 whitespace-nowrap" :title="e.timestamp" x-text="relTime(e.timestamp)"></td><td class="td"><span class="badge" :class="levelBadge(e.level)" x-text="e.level"></span></td><td class="td text-xs font-mono" x-text="e.device_id||'—'"></td><td class="td text-sm" x-text="e.message"></td><td class="td text-xs text-slate-400 whitespace-nowrap" x-text="e.run_id"></td></tr>
                 </template>
               </tbody>
             </table></div>
@@ -411,12 +529,27 @@
               <tbody><template x-for="(r,i) in up.scanResults" :key="i"><tr><td class="td"><input type="checkbox" x-model="r._selected" class="rounded"></td><td class="td font-mono text-sm" x-text="r.order_number"></td><td class="td" x-text="r.wh_id"></td><td class="td font-mono text-sm" x-text="r.item_number"></td></tr></template></tbody>
             </table></div>
           </div>
-          <div x-show="up.execResults.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-200 text-sm font-semibold text-slate-700">Execution Results</div>
-            <div class="overflow-x-auto"><table class="min-w-full">
-              <thead><tr><th class="th">Order</th><th class="th">Item</th><th class="th">Status</th><th class="th">Message</th></tr></thead>
-              <tbody><template x-for="(r,i) in up.execResults" :key="i"><tr><td class="td font-mono text-sm" x-text="r.order_number"></td><td class="td font-mono text-sm" x-text="r.item_number"></td><td class="td"><span class="badge" :class="statusBadge(r.status)" x-text="r.status"></span></td><td class="td text-sm" x-text="r.message"></td></tr></template></tbody>
-            </table></div>
+          <div x-show="up.execResults.length>0">
+            <div class="flex gap-3 mb-3">
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <span class="text-2xl font-bold text-emerald-700" x-text="up.execResults.filter(r=>r.status==='SUCCESS').length"></span>
+                <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Success</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <span class="text-2xl font-bold text-amber-700" x-text="up.execResults.filter(r=>r.status==='WARNING').length"></span>
+                <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Warning</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
+                <span class="text-2xl font-bold text-red-700" x-text="up.execResults.filter(r=>r.status==='ERROR').length"></span>
+                <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div class="overflow-x-auto"><table class="min-w-full">
+                <thead><tr><th class="th">Order</th><th class="th">Item</th><th class="th">Status</th><th class="th">Message</th></tr></thead>
+                <tbody><template x-for="(r,i) in up.execResults" :key="i"><tr><td class="td font-mono text-sm" x-text="r.order_number"></td><td class="td font-mono text-sm" x-text="r.item_number"></td><td class="td"><span class="badge" :class="statusBadge(r.status)" x-text="r.status"></span></td><td class="td text-sm" x-text="r.message"></td></tr></template></tbody>
+              </table></div>
+            </div>
           </div>
         </div>
 
@@ -483,14 +616,21 @@
             <button class="btn-secondary btn-sm" @click="upLoadLogs()">↻ Refresh</button>
             <button class="btn-secondary btn-sm" @click="upDownloadLogs('csv')">↓ CSV</button>
             <button class="btn-secondary btn-sm" @click="upDownloadLogs('txt')">↓ TXT</button>
-            <span class="text-slate-500 text-sm" x-text="up.logs.length+' entries'"></span>
+            <select x-model="up.logLevel" class="select btn-sm w-32 font-normal">
+              <option value="">All levels</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+            <input x-model="up.logSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search logs…">
+            <span class="text-slate-500 text-sm ml-auto" x-text="filteredUpLogs().length+' / '+up.logs.length+' entries'"></span>
           </div>
           <div x-show="up.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>
-          <div x-show="!up.logsLoading&&up.logs.length===0" class="card text-slate-500 text-sm">No log entries yet.</div>
-          <div x-show="!up.logsLoading&&up.logs.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div x-show="!up.logsLoading&&filteredUpLogs().length===0" class="card text-slate-500 text-sm">No matching log entries.</div>
+          <div x-show="!up.logsLoading&&filteredUpLogs().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="overflow-x-auto"><table class="min-w-full">
               <thead><tr><th class="th">Timestamp</th><th class="th">Level</th><th class="th">WH</th><th class="th">Order</th><th class="th">Item</th><th class="th">Message</th></tr></thead>
-              <tbody><template x-for="(e,i) in up.logs" :key="i"><tr><td class="td text-xs text-slate-500 whitespace-nowrap" x-text="e.timestamp"></td><td class="td"><span class="badge" :class="levelBadge(e.level)" x-text="e.level"></span></td><td class="td text-xs" x-text="e.wh_id||'—'"></td><td class="td font-mono text-xs" x-text="e.order_number||'—'"></td><td class="td font-mono text-xs" x-text="e.item_number||'—'"></td><td class="td text-sm" x-text="e.message"></td></tr></template></tbody>
+              <tbody><template x-for="(e,i) in filteredUpLogs()" :key="i"><tr><td class="td text-xs text-slate-500 whitespace-nowrap" :title="e.timestamp" x-text="relTime(e.timestamp)"></td><td class="td"><span class="badge" :class="levelBadge(e.level)" x-text="e.level"></span></td><td class="td text-xs" x-text="e.wh_id||'—'"></td><td class="td font-mono text-xs" x-text="e.order_number||'—'"></td><td class="td font-mono text-xs" x-text="e.item_number||'—'"></td><td class="td text-sm" x-text="e.message"></td></tr></template></tbody>
             </table></div>
           </div>
         </div>
@@ -498,19 +638,22 @@
 
       <!-- ══ USERS ══ -->
       <div x-show="view==='users'">
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h3 class="text-lg font-semibold text-slate-800">User Management</h3>
-          <button class="btn-primary" @click="auOpenCreate()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-            Add User
-          </button>
+          <div class="flex items-center gap-3">
+            <input x-model="au.userSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search users…">
+            <button class="btn-primary" @click="auOpenCreate()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Add User
+            </button>
+          </div>
         </div>
         <div x-show="au.loading" class="text-slate-500 text-sm p-4">Loading…</div>
         <div x-show="!au.loading" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="overflow-x-auto"><table class="min-w-full">
             <thead><tr><th class="th">Name</th><th class="th">Username</th><th class="th">Role</th><th class="th">Agent Permissions</th><th class="th">Status</th><th class="th">Last Login</th><th class="th"></th></tr></thead>
             <tbody>
-              <template x-for="u in au.list" :key="u.id">
+              <template x-for="u in filteredUsers()" :key="u.id">
                 <tr>
                   <td class="td"><div class="flex items-center gap-2"><div class="w-7 h-7 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold flex-shrink-0" x-text="userInitials(u)"></div><span class="font-medium" x-text="u.display_name||u.username"></span></div></td>
                   <td class="td text-slate-500 text-sm" x-text="u.username"></td>
@@ -527,13 +670,13 @@
                   <td class="td"><span class="badge" :class="u.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'" x-text="u.is_active?'Active':'Inactive'"></span></td>
                   <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(u.last_login)"></td>
                   <td class="td"><div class="flex items-center gap-2 justify-end">
-                    <button class="btn-secondary btn-sm" @click="auOpenEdit(u)">Edit</button>
-                    <button x-show="u.is_active&&u.id!==(user&&user.id)" class="btn-danger btn-sm" @click="auDeactivate(u.id)">Deactivate</button>
-                    <button x-show="!u.is_active" class="btn-primary btn-sm" style="background:#059669;color:#fff;" @click="auActivate(u.id)">Activate</button>
+                    <button class="btn-secondary btn-sm" x-show="isSuperadmin() || !['admin','superadmin'].includes(u.role)" @click="auOpenEdit(u)">Edit</button>
+                    <button x-show="(u.is_active&&u.id!==(user&&user.id)) && (isSuperadmin() || !['admin','superadmin'].includes(u.role))" class="btn-danger btn-sm" @click="auDeactivate(u.id)">Deactivate</button>
+                    <button x-show="(!u.is_active) && (isSuperadmin() || !['admin','superadmin'].includes(u.role))" class="btn-primary btn-sm" style="background:#059669;color:#fff;" @click="auActivate(u.id)">Activate</button>
                   </div></td>
                 </tr>
               </template>
-              <tr x-show="au.list.length===0"><td class="td text-slate-500 text-sm" colspan="7">No users found.</td></tr>
+              <tr x-show="filteredUsers().length===0"><td class="td text-slate-500 text-sm" colspan="7" x-text="au.userSearch?'No users match your search.':'No users found.'"></td></tr>
             </tbody>
           </table></div>
         </div>
@@ -610,6 +753,69 @@
             </tbody>
           </table></div>
         </div>
+        </div>
+      </div>
+
+      <!-- ══ MY HISTORY ══ -->
+      <div x-show="view==='my-history'">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <button class="btn-secondary btn-sm" @click="myHistoryLoad()">↻ Refresh</button>
+          <span class="text-slate-500 text-sm" x-text="myHistory.length+' entries'"></span>
+          <input x-model="myHistorySearch" type="text" class="input btn-sm w-48 ml-auto font-normal" placeholder="Search my history...">
+        </div>
+        <div x-show="myHistoryLoading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!myHistoryLoading&&filteredMyHistory().length===0" class="card text-slate-500 text-sm">No matching history entries found.</div>
+        <div x-show="!myHistoryLoading&&filteredMyHistory().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">Timestamp</th><th class="th">Action</th><th class="th">Target</th><th class="th">IP Address</th><th class="th">Details</th></tr></thead>
+            <tbody>
+              <template x-for="log in filteredMyHistory()" :key="log.id">
+                <tr>
+                  <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(log.timestamp)"></td>
+                  <td class="td"><span class="badge bg-slate-100 text-slate-700 font-mono text-[10px]" x-text="log.action"></span></td>
+                  <td class="td text-xs font-mono text-slate-600" x-text="log.target"></td>
+                  <td class="td text-xs text-slate-500" x-text="log.details.ip_address||'—'"></td>
+                  <td class="td text-xs text-slate-600 font-mono max-w-xs truncate" x-text="JSON.stringify(cleanAuditDetails(log.details))"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- ══ AGENT WORKFLOWS ══ -->
+      <div x-show="view==='agent-workflows'">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-lg font-semibold text-slate-800">Agent Workflows</h3>
+          <button class="btn-primary" @click="awOpenCreate()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Agent
+          </button>
+        </div>
+        <div x-show="aw.loading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!aw.loading&&aw.list.length===0" class="card text-slate-500 text-sm">No agent workflows found.</div>
+        <div x-show="!aw.loading&&aw.list.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">ID</th><th class="th">Name</th><th class="th">Description</th><th class="th">YAML Query Config</th><th class="th"></th></tr></thead>
+            <tbody>
+              <template x-for="agent in aw.list" :key="agent.id">
+                <tr>
+                  <td class="td font-mono text-xs text-slate-600" x-text="agent.id"></td>
+                  <td class="td font-medium text-slate-800" x-text="agent.name"></td>
+                  <td class="td text-slate-500 text-sm" x-text="agent.description||'—'"></td>
+                  <td class="td text-xs text-slate-400 font-mono">
+                    <span x-show="agent.flow_yaml" class="badge bg-indigo-50 text-indigo-700">customized</span>
+                    <span x-show="!agent.flow_yaml" class="badge bg-slate-100 text-slate-500">default</span>
+                  </td>
+                  <td class="td"><div class="flex items-center gap-2 justify-end">
+                    <button class="btn-secondary btn-sm" @click="awOpenEdit(agent)">Edit Flow</button>
+                    <button x-show="!['device_reset','unpick'].includes(agent.id)" class="btn-danger btn-sm" @click="awDelete(agent.id)">Delete</button>
+                  </div></td>
+                </tr>
+              </template>
+            </tbody>
+          </table></div>
+        </div>
       </div>
 
     </main>
@@ -623,14 +829,23 @@
          :class="{'bg-white border-slate-200 text-slate-800':t.type==='info','bg-emerald-50 border-emerald-200 text-emerald-800':t.type==='success','bg-red-50 border-red-200 text-red-800':t.type==='error','bg-amber-50 border-amber-200 text-amber-800':t.type==='warning'}"
          x-transition:enter="transition ease-out duration-200 transform" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100"
          x-transition:leave="transition ease-in duration-150 transform" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0">
+      <!-- Icon -->
+      <span class="flex-shrink-0 mt-0.5">
+        <svg x-show="t.type==='success'" class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+        <svg x-show="t.type==='error'" class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+        <svg x-show="t.type==='warning'" class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <svg x-show="t.type==='info'" class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </span>
       <span class="flex-1" x-text="t.msg"></span>
-      <button @click="toasts=toasts.filter(x=>x.id!==t.id)" class="flex-shrink-0 opacity-50 hover:opacity-100">✕</button>
+      <button @click="toasts=toasts.filter(x=>x.id!==t.id)" class="flex-shrink-0 opacity-40 hover:opacity-80 transition-opacity">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
   </template>
 </div>
 
 <!-- ═══════════════════════ MODAL: User ═════════════════════════════════ -->
-<div x-show="au.modal" class="modal-backdrop" @click.self="au.modal=false"
+<div x-show="au.modal" class="modal-backdrop" @click.self="au.modal=false" @keydown.escape.window="au.modal=false"
      x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
      x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
   <div class="modal max-w-lg" @click.stop>
@@ -645,20 +860,19 @@
       </div>
       <div><label class="label" x-text="au.editId?'New Password (blank = keep)':'Password'"></label><input x-model="au.form.password" type="password" class="input" :placeholder="au.editId?'Leave blank to keep current':'Set password'"></div>
       <div>
-        <label class="label">Role</label>
         <select x-model="au.form.role" class="select">
           <option value="user">User</option>
-          <option value="admin">Admin</option>
+          <option value="admin" x-show="isSuperadmin()">Admin</option>
           <option value="superadmin" x-show="isSuperadmin()">Superadmin</option>
         </select>
       </div>
       <div x-show="au.form.role==='user'">
         <label class="label">Agent Permissions</label>
         <div class="flex flex-wrap gap-4 mt-2">
-          <template x-for="perm in AGENT_PERMS" :key="perm">
+          <template x-for="agent in registeredAgents" :key="agent.id">
             <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" :checked="au.form.agent_perms.includes(perm)" @change="auTogglePerm(perm)" class="rounded w-4 h-4 border-slate-300 text-indigo-600">
-              <span class="text-sm text-slate-700 capitalize" x-text="perm.replace('_',' ')"></span>
+              <input type="checkbox" :checked="au.form.agent_perms.includes(agent.id)" @change="auTogglePerm(agent.id)" class="rounded w-4 h-4 border-slate-300 text-indigo-600">
+              <span class="text-sm text-slate-700 capitalize" x-text="agent.name"></span>
             </label>
           </template>
         </div>
@@ -679,7 +893,7 @@
 </div>
 
 <!-- ═══════════════════════ MODAL: DB Config ════════════════════════════ -->
-<div x-show="dbc.modal" class="modal-backdrop" @click.self="dbc.modal=false"
+<div x-show="dbc.modal" class="modal-backdrop" @click.self="dbc.modal=false" @keydown.escape.window="dbc.modal=false"
      x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
      x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
   <div class="modal max-w-2xl" @click.stop>
@@ -790,7 +1004,7 @@
 </div>
 
 <!-- ═══════════════════════ MODAL: Audit Detail ═════════════════════════ -->
-<div x-show="au.auditDetailModal" class="modal-backdrop" @click.self="au.auditDetailModal=false"
+<div x-show="au.auditDetailModal" class="modal-backdrop" @click.self="au.auditDetailModal=false" @keydown.escape.window="au.auditDetailModal=false"
      x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
      x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
   <div class="modal max-w-lg" @click.stop>
@@ -817,6 +1031,37 @@
     </div>
     <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
       <button class="btn-secondary w-full sm:w-auto justify-center" @click="au.auditDetailModal=false">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: Agent Workflow ═══════════════════════ -->
+<div x-show="aw.modal" class="modal-backdrop" @click.self="aw.modal=false" @keydown.escape.window="aw.modal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-2xl" @click.stop>
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg" x-text="aw.editId ? 'Edit Agent Workflow' : 'Add Agent Workflow'"></h3>
+      <button @click="aw.modal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div x-show="aw.error" class="p-3 bg-red-50 border border-red-200 text-red-800 text-sm rounded-lg" x-text="aw.error"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="label">Agent ID</label><input x-model="aw.form.id" class="input" placeholder="e.g. custom_agent" :disabled="!!aw.editId"></div>
+        <div><label class="label">Agent Name</label><input x-model="aw.form.name" class="input" placeholder="e.g. Custom Agent"></div>
+      </div>
+      <div><label class="label">Description</label><input x-model="aw.form.description" class="input" placeholder="Short description of what the agent does"></div>
+      <div>
+        <label class="label">YAML Flow Query Config</label>
+        <textarea x-model="aw.form.flow_yaml" rows="12" class="input font-mono text-xs" style="font-family: monospace;" placeholder="queries:&#10;  find_picked_qty: |&#10;    SELECT picked_quantity FROM t_pick_detail WHERE ..."></textarea>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button class="btn-secondary w-full sm:w-auto justify-center" @click="aw.modal=false">Cancel</button>
+      <button class="btn-primary w-full sm:w-auto justify-center" @click="awSave()" :disabled="aw.saving">
+        <svg x-show="aw.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span x-text="aw.saving?'Saving…':(aw.editId?'Save Flow':'Create Agent')"></span>
+      </button>
     </div>
   </div>
 </div>
@@ -858,6 +1103,15 @@
                 <svg x-show="showNew" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" x-cloak><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
               </button>
             </div>
+            <div x-show="profile.form.new_password.length>0" class="mt-2">
+              <div class="flex gap-1 mb-1">
+                <template x-for="i in 4">
+                  <div class="h-1.5 flex-1 rounded-full transition-colors duration-200"
+                       :class="i<=pwStrength(profile.form.new_password).score ? pwStrength(profile.form.new_password).barColor : 'bg-slate-200'"></div>
+                </template>
+              </div>
+              <span class="text-xs font-medium" :class="pwStrength(profile.form.new_password).textColor" x-text="pwStrength(profile.form.new_password).label"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -872,22 +1126,46 @@
   </div>
 </div>
 
+<!-- ═══════════════════════ MODAL: Confirm ══════════════════════════════ -->
+<div x-show="confirm.show" class="modal-backdrop" @keydown.escape.window="confirmCancel()"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-sm" @click.stop>
+    <div class="p-6">
+      <div class="flex items-start gap-4">
+        <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-800 text-base mb-1">Confirm Action</h3>
+          <p class="text-sm text-slate-600" x-text="confirm.msg"></p>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-row justify-end gap-3 px-6 pb-6">
+      <button class="btn-secondary" @click="confirmCancel()">Cancel</button>
+      <button class="btn-danger" @click="confirmOk()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════════ ALPINE LOGIC ════════════════════════════════ -->
 <script>
 function app() {
   return {
     user: null, view: 'device-reset', sidebarOpen: false, toasts: [], dbConfigs: [],
     loginForm: { username:'', password:'', error:'', loading:false },
+    confirm: { show: false, msg: '', resolve: null },
     dr: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
           manualDbId:'', manualDeviceId:'', manualLoading:false, manualResult:null,
-          logs:[], logsLoading:false,
+          logs:[], logsLoading:false, logSearch:'', logLevel:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[] },
     up: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[],
           manualDbId:'', manualWhId:'', manualOrderNum:'', manualItemNum:'', manualLoading:false, manualResult:null,
           partialDbId:'', partialWhId:'', partialOrderNum:'', partialItemNum:'', partialQty:'',
-          partialLoading:false, partialResult:null, logs:[], logsLoading:false },
-    au: { list:[], loading:false, modal:false, editId:null, saving:false,
+          partialLoading:false, partialResult:null, logs:[], logsLoading:false, logSearch:'', logLevel:'' },
+    au: { list:[], loading:false, modal:false, editId:null, saving:false, userSearch:'',
           form:{username:'',display_name:'',password:'',role:'user',agent_perms:[],is_active:true},
           auditLogs:[], auditLoading:false, auditSearch:'', auditDetailModal:false, activeAudit:null },
     dbc: { list:[], loading:false, modal:false, editId:null, modalTab:'connection', saving:false,
@@ -900,13 +1178,19 @@ function app() {
                  log_db:{server:'',port:'',database:'',username:'',password:'',driver:''},
                  notify:{teams_webhook:'',slack_webhook:'',report_after_run:false,on_error:true,on_warning:false}} },
     profile: { modal:false, saving:false, form:{display_name:'',current_password:'',new_password:''} },
-    AGENT_PERMS: ['device_reset','unpick'],
+    registeredAgents: [],
+    myHistory: [],
+    myHistoryLoading: false,
+    myHistorySearch: '',
+    aw: { list:[], loading:false, modal:false, editId:null, saving:false, error:'',
+          form:{id:'', name:'', description:'', flow_yaml:''} },
 
     async init() {
       try {
         const r = await fetch('/api/v0/auth/me',{credentials:'same-origin'});
         if (r.ok) {
           this.user = await r.json();
+          await this.loadAgents();
           this.view = this._dv();
           await this.loadDbConfigs();
           this._lvd();
@@ -920,21 +1204,24 @@ function app() {
       if (this.hasAgentPerm('device_reset')) return 'device-reset';
       if (this.hasAgentPerm('unpick')) return 'unpick';
       if (this.isAdmin()) return 'users';
-      return 'device-reset';
+      return 'my-history';
     },
     isAdmin()      { return this.user && ['admin','superadmin'].includes(this.user.role); },
     isSuperadmin() { return this.user && this.user.role === 'superadmin'; },
     canSeeDeviceReset() { return this.hasAgentPerm('device_reset'); },
     canSeeUnpick()      { return this.hasAgentPerm('unpick'); },
     hasAgentPerm(p) { return !!this.user && (this.isAdmin() || (this.user.agent_perms||[]).includes(p)); },
-    pageTitle() { return {['device-reset']:'Device Reset Agent',unpick:'Unpick Agent',users:'User Management',['db-config']:'DB Configurations',['audit-logs']:'System Audit Logs'}[this.view]||'Tychons Forge'; },
+    pageTitle() { return {dashboard:'Dashboard',['device-reset']:'Device Reset Agent',unpick:'Unpick Agent',users:'User Management',['db-config']:'DB Configurations',['audit-logs']:'System Audit Logs',['my-history']:'My Audit History',['agent-workflows']:'Agent Workflows'}[this.view]||'Tychons Forge'; },
     nav(v) { this.view=v; this.sidebarOpen=false; this._lvd(); },
     _lvd() {
-      if (this.view==='device-reset') this.drLoadScheduler();
+      if (this.view==='dashboard') { this.drLoadScheduler(); this.upLoadScheduler(); }
+      else if (this.view==='device-reset') this.drLoadScheduler();
       else if (this.view==='unpick') this.upLoadScheduler();
       else if (this.view==='users') this.auLoad();
       else if (this.view==='db-config') this.dbcLoad();
       else if (this.view==='audit-logs') this.auLoadAuditLogs();
+      else if (this.view==='my-history') this.myHistoryLoad();
+      else if (this.view==='agent-workflows') this.awLoad();
     },
     async api(path, opts={}) {
       const getCookie = (name) => {
@@ -955,6 +1242,9 @@ function app() {
       return d;
     },
     toast(msg,type='info') { const id=Date.now()+Math.random(); this.toasts.push({id,msg,type}); setTimeout(()=>{this.toasts=this.toasts.filter(t=>t.id!==id);},5000); },
+    confirmDialog(msg) { return new Promise(resolve => { this.confirm = { show: true, msg, resolve }; }); },
+    confirmOk()     { if (this.confirm.resolve) this.confirm.resolve(true);  this.confirm = { show: false, msg: '', resolve: null }; },
+    confirmCancel() { if (this.confirm.resolve) this.confirm.resolve(false); this.confirm = { show: false, msg: '', resolve: null }; },
     
     async doLogin() {
       this.loginForm.loading=true; this.loginForm.error='';
@@ -986,7 +1276,7 @@ function app() {
     async drLoadScheduler(){this.dr.schedulerLoading=true;try{this.dr.schedulerInfo=await this.api('/api/v0/device_reset_agent/scheduler_status');}catch(e){this.dr.schedulerInfo=null;}finally{this.dr.schedulerLoading=false;}},
     async drToggle(){try{await this.api('/api/v0/device_reset_agent/scheduler_toggle',{method:'POST'});await this.drLoadScheduler();this.toast('Scheduler updated','success');}catch(e){this.toast(e.message,'error');}},
     async drSetInterval(){const h=parseFloat(this.dr.intervalInput);if(!h||h<.25||h>168){this.toast('Interval must be 0.25–168 hours','error');return;}try{await this.api('/api/v0/device_reset_agent/scheduler_interval',{method:'POST',body:JSON.stringify({hours:h})});this.dr.intervalInput='';await this.drLoadScheduler();this.toast(`Interval set to ${h}h`,'success');}catch(e){this.toast(e.message,'error');}},
-    async drManualReset(){if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast('Select DB and enter device ID','error');return;}this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim()})});this.dr.manualResult={ok:true,steps:d.steps||[]};this.toast('Device reset successful','success');}catch(e){this.dr.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
+    async drManualReset(){if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast('Select DB and enter device ID','error');return;}if(!await this.confirmDialog(`Reset device "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim()})});this.dr.manualResult={ok:true,steps:d.steps||[]};this.toast('Device reset successful','success');}catch(e){this.dr.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
     async drLoadLogs(){this.dr.logsLoading=true;try{const d=await this.api('/api/v0/device_reset_logs');this.dr.logs=d?d.logs:[];}catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}},
     drDownloadLogs(fmt){window.location.href=`/api/v0/device_reset_logs/download?format=${fmt}`;},
     async drAutoScan(){
@@ -1009,6 +1299,7 @@ function app() {
     async drExecuteSelected(){
       const devices=this.dr.scanResults.filter(r=>r._selected).map(({_selected,...r})=>r);
       if(!devices.length){this.toast('Select at least one device','error');return;}
+      if(!await this.confirmDialog(`Execute device reset on ${devices.length} device(s)? This will modify warehouse records.`))return;
       this.dr.execLoading=true;
       this.dr.execResults=[];
       try{
@@ -1028,7 +1319,7 @@ function app() {
     async upAutoScan(){if(!this.up.scanDbId){this.toast('Select a database','error');return;}this.up.scanLoading=true;this.up.scanResults=[];this.up.execResults=[];try{const d=await this.api('/api/v0/unpick_agent/auto_scan',{method:'POST',body:JSON.stringify({db_config_id:this.up.scanDbId})});this.up.scanResults=(d?.records||[]).map(r=>({...r,_selected:false}));this.toast(this.up.scanResults.length?`Found ${this.up.scanResults.length} record(s)`:'No dirty records found',this.up.scanResults.length?'success':'info');}catch(e){this.toast(e.message,'error');}finally{this.up.scanLoading=false;}},
     upToggleAll(v){this.up.scanResults.forEach(r=>r._selected=v);},
     upSelectedCount(){return this.up.scanResults.filter(r=>r._selected).length;},
-    async upExecuteSelected(){const records=this.up.scanResults.filter(r=>r._selected).map(({_selected,...r})=>r);if(!records.length){this.toast('Select at least one record','error');return;}this.up.execLoading=true;this.up.execResults=[];try{const d=await this.api('/api/v0/unpick_agent/execute',{method:'POST',body:JSON.stringify({db_config_id:this.up.scanDbId,records})});this.up.execResults=d?.results||[];const ok=this.up.execResults.filter(r=>r.status==='SUCCESS').length;this.toast(`${ok}/${records.length} records processed`,ok===records.length?'success':'warning');}catch(e){this.toast(e.message,'error');}finally{this.up.execLoading=false;}},
+    async upExecuteSelected(){const records=this.up.scanResults.filter(r=>r._selected).map(({_selected,...r})=>r);if(!records.length){this.toast('Select at least one record','error');return;}if(!await this.confirmDialog(`Execute unpick on ${records.length} record(s)? This will modify warehouse inventory records.`))return;this.up.execLoading=true;this.up.execResults=[];try{const d=await this.api('/api/v0/unpick_agent/execute',{method:'POST',body:JSON.stringify({db_config_id:this.up.scanDbId,records})});this.up.execResults=d?.results||[];const ok=this.up.execResults.filter(r=>r.status==='SUCCESS').length;this.toast(`${ok}/${records.length} records processed`,ok===records.length?'success':'warning');}catch(e){this.toast(e.message,'error');}finally{this.up.execLoading=false;}},
     async upManualUnpick(){const{manualDbId:db_config_id,manualWhId:wh_id,manualOrderNum:order_number,manualItemNum:item_number}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number){this.toast('All fields are required','error');return;}this.up.manualLoading=true;this.up.manualResult=null;try{const d=await this.api('/api/v0/unpick_agent/manual_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number})});this.up.manualResult={ok:true,message:d.message};this.toast('Manual unpick successful','success');}catch(e){this.up.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.manualLoading=false;}},
     async upPartialUnpick(){const{partialDbId:db_config_id,partialWhId:wh_id,partialOrderNum:order_number,partialItemNum:item_number,partialQty}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number||!partialQty){this.toast('All fields are required','error');return;}this.up.partialLoading=true;this.up.partialResult=null;try{const d=await this.api('/api/v0/unpick_agent/partial_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number,unpick_qty:parseFloat(partialQty)})});this.up.partialResult={ok:true,message:d.message};this.toast('Partial unpick successful','success');}catch(e){this.up.partialResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.partialLoading=false;}},
     async upLoadLogs(){this.up.logsLoading=true;try{const d=await this.api('/api/v0/unpick_agent/logs');this.up.logs=d?d.logs:[];}catch(e){this.up.logs=[];}finally{this.up.logsLoading=false;}},
@@ -1038,7 +1329,7 @@ function app() {
     auOpenEdit(u){this.au.editId=u.id;this.au.form={username:u.username,display_name:u.display_name||u.username,password:'',role:u.role,agent_perms:[...u.agent_perms],is_active:u.is_active};this.au.modal=true;},
     auTogglePerm(p){const i=this.au.form.agent_perms.indexOf(p);if(i===-1)this.au.form.agent_perms.push(p);else this.au.form.agent_perms.splice(i,1);},
     async auSave(){this.au.saving=true;try{if(this.au.editId){const p={display_name:this.au.form.display_name,role:this.au.form.role,agent_perms:this.au.form.agent_perms,is_active:this.au.form.is_active};if(this.au.form.password)p.password=this.au.form.password;await this.api(`/api/v0/admin/users/${this.au.editId}`,{method:'PATCH',body:JSON.stringify(p)});this.toast('User updated','success');}else{await this.api('/api/v0/admin/users',{method:'POST',body:JSON.stringify(this.au.form)});this.toast('User created','success');}this.au.modal=false;await this.auLoad();}catch(e){this.toast(e.message,'error');}finally{this.au.saving=false;}},
-    async auDeactivate(id){if(!confirm('Deactivate this user?'))return;try{await this.api(`/api/v0/admin/users/${id}`,{method:'DELETE'});this.toast('User deactivated','success');await this.auLoad();}catch(e){this.toast(e.message,'error');}},
+    async auDeactivate(id){if(!await this.confirmDialog('Deactivate this user? They will lose access immediately.'))return;try{await this.api(`/api/v0/admin/users/${id}`,{method:'DELETE'});this.toast('User deactivated','success');await this.auLoad();}catch(e){this.toast(e.message,'error');}},
     async auActivate(id){try{await this.api(`/api/v0/admin/users/${id}`,{method:'PATCH',body:JSON.stringify({is_active:true})});this.toast('User activated','success');await this.auLoad();}catch(e){this.toast(e.message,'error');}},
     async auLoadAuditLogs() {
       this.au.auditLoading = true;
@@ -1076,6 +1367,102 @@ function app() {
         const ip = (log.details.ip_address || '').toLowerCase();
         return username.includes(q) || action.includes(q) || target.includes(q) || ip.includes(q);
       });
+    },
+    async loadAgents() {
+      try {
+        const d = await this.api('/api/v0/agents');
+        this.registeredAgents = d ? d.agents : [];
+      } catch(e) {
+        this.registeredAgents = [
+          {id: 'device_reset', name: 'Device Reset', description: 'Stuck device engine relocation agent'},
+          {id: 'unpick', name: 'Unpick Agent', description: 'Stuck pick detail transaction log unpick agent'}
+        ];
+      }
+    },
+    async myHistoryLoad() {
+      this.myHistoryLoading = true;
+      try {
+        const d = await this.api('/api/v0/auth/my_history');
+        this.myHistory = d ? d.audit_logs : [];
+      } catch(e) {
+        this.toast(e.message, 'error');
+        this.myHistory = [];
+      } finally {
+        this.myHistoryLoading = false;
+      }
+    },
+    filteredMyHistory() {
+      const q = (this.myHistorySearch || '').toLowerCase().trim();
+      if (!q) return this.myHistory;
+      return this.myHistory.filter(log => {
+        const action = (log.action || '').toLowerCase();
+        const target = (log.target || '').toLowerCase();
+        const ip = (log.details.ip_address || '').toLowerCase();
+        return action.includes(q) || target.includes(q) || ip.includes(q);
+      });
+    },
+    async awLoad() {
+      this.aw.loading = true;
+      try {
+        await this.loadAgents();
+        this.aw.list = this.registeredAgents;
+      } catch(e) {
+        this.toast(e.message, 'error');
+      } finally {
+        this.aw.loading = false;
+      }
+    },
+    awOpenCreate() {
+      this.aw.editId = null;
+      this.aw.error = '';
+      this.aw.form = { id:'', name:'', description:'', flow_yaml:'' };
+      this.aw.modal = true;
+    },
+    awOpenEdit(agent) {
+      this.aw.editId = agent.id;
+      this.aw.error = '';
+      this.aw.form = { id: agent.id, name: agent.name, description: agent.description || '', flow_yaml: agent.flow_yaml || '' };
+      this.aw.modal = true;
+    },
+    async awSave() {
+      this.aw.saving = true;
+      this.aw.error = '';
+      try {
+        if (this.aw.editId) {
+          await this.api(`/api/v0/admin/agents/${this.aw.editId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              name: this.aw.form.name,
+              description: this.aw.form.description,
+              flow_yaml: this.aw.form.flow_yaml
+            })
+          });
+          this.toast('Agent workflow updated', 'success');
+        } else {
+          await this.api('/api/v0/admin/agents', {
+            method: 'POST',
+            body: JSON.stringify(this.aw.form)
+          });
+          this.toast('Agent workflow registered', 'success');
+        }
+        this.aw.modal = false;
+        await this.awLoad();
+      } catch(e) {
+        this.aw.error = e.message;
+        this.toast(e.message, 'error');
+      } finally {
+        this.aw.saving = false;
+      }
+    },
+    async awDelete(id) {
+      if (!await this.confirmDialog('Delete this agent workflow? This cannot be undone.')) return;
+      try {
+        await this.api(`/api/v0/admin/agents/${id}`, { method: 'DELETE' });
+        this.toast('Agent workflow deleted', 'success');
+        await this.awLoad();
+      } catch(e) {
+        this.toast(e.message, 'error');
+      }
     },
     async dbcLoad(){this.dbc.loading=true;try{const d=await this.api('/api/v0/admin/db_configs');this.dbc.list=d?Object.entries(d.db_configs).map(([id,c])=>({id,...c})):[];}catch(e){this.toast(e.message,'error');}finally{this.dbc.loading=false;}},
     dbcOpenCreate(){
@@ -1148,7 +1535,7 @@ function app() {
         this.dbc.saving=false;
       }
     },
-    async dbcDelete(id){if(!confirm(`Delete "${id}"?`))return;try{await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}`,{method:'DELETE'});this.toast('Config deleted','success');await this.dbcLoad();await this.loadDbConfigs();}catch(e){this.toast(e.message,'error');}},
+    async dbcDelete(id){if(!await this.confirmDialog(`Delete database config "${id}"? This cannot be undone.`))return;try{await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}`,{method:'DELETE'});this.toast('Config deleted','success');await this.dbcLoad();await this.loadDbConfigs();}catch(e){this.toast(e.message,'error');}},
     async dbcTestConn(id){this.dbc.testConnLoading=true;this.dbc.testConnResult=null;try{const d=await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}/test_connection`,{method:'POST'});this.dbc.testConnResult={ok:true,msg:d?.message||'Connection successful'};this.toast('Connection successful','success');}catch(e){this.dbc.testConnResult={ok:false,msg:e.message};this.toast(e.message,'error');}finally{this.dbc.testConnLoading=false;}},
     async dbcTestFormConn(target='primary'){
       const isLog = target === 'log';
@@ -1190,6 +1577,20 @@ function app() {
     async dbcTestNotify(id,channel){try{await this.api('/api/v0/notify/test',{method:'POST',body:JSON.stringify({db_config_id:id,channel})});this.toast(`${channel} test message sent`,'success');}catch(e){this.toast(e.message,'error');}},
     openProfile(){this.profile.form={display_name:this.user.display_name||'',current_password:'',new_password:''};this.profile.modal=true;},
     async saveProfile(){this.profile.saving=true;try{const p={};if(this.profile.form.display_name.trim())p.display_name=this.profile.form.display_name.trim();if(this.profile.form.new_password){p.current_password=this.profile.form.current_password;p.new_password=this.profile.form.new_password;}await this.api('/api/v0/auth/profile',{method:'PATCH',body:JSON.stringify(p)});if(p.display_name)this.user={...this.user,display_name:p.display_name};if(this.profile.form.new_password){this.user.force_change_password=false;}this.profile.modal=false;this.toast('Profile updated','success');}catch(e){this.toast(e.message,'error');}finally{this.profile.saving=false;}},
+    filteredDrLogs() {
+      let logs = this.dr.logs;
+      if (this.dr.logLevel) logs = logs.filter(e => e.level === this.dr.logLevel);
+      const q = (this.dr.logSearch || '').toLowerCase().trim();
+      if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.device_id||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
+      return logs;
+    },
+    filteredUpLogs() {
+      let logs = this.up.logs;
+      if (this.up.logLevel) logs = logs.filter(e => e.level === this.up.logLevel);
+      const q = (this.up.logSearch || '').toLowerCase().trim();
+      if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.order_number||'').toLowerCase().includes(q) || (e.item_number||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
+      return logs;
+    },
     levelBadge(l){return({INFO:'bg-blue-100 text-blue-700',WARNING:'bg-amber-100 text-amber-700',ERROR:'bg-red-100 text-red-700',SUCCESS:'bg-emerald-100 text-emerald-700'})[l]||'bg-slate-100 text-slate-600';},
     statusBadge(s){return({SUCCESS:'bg-emerald-100 text-emerald-700',WARNING:'bg-amber-100 text-amber-700',ERROR:'bg-red-100 text-red-700'})[s]||'bg-slate-100 text-slate-600';},
     roleBadge(r){return({superadmin:'bg-purple-100 text-purple-700',admin:'bg-blue-100 text-blue-700',user:'bg-slate-100 text-slate-600'})[r]||'bg-slate-100 text-slate-600';},
