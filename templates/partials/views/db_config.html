@@ -1,0 +1,40 @@
+      <!-- ══ DB CONFIG ══ -->
+      <div x-show="view==='db-config'">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-lg font-semibold text-slate-800">Database Configurations</h3>
+          <button class="btn-primary" @click="dbcOpenCreate()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Config
+          </button>
+        </div>
+        <div x-show="dbc.loading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!dbc.loading" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">Name</th><th class="th">Type</th><th class="th">Server</th><th class="th">Database</th><th class="th">Notifications</th><th class="th"></th></tr></thead>
+            <tbody>
+              <template x-for="c in dbc.list" :key="c.id">
+                <tr>
+                  <td class="td font-semibold text-slate-800" x-text="c.id"></td>
+                  <td class="td"><span class="badge" :class="c.db_type==='oracle'?'bg-orange-100 text-orange-700':'bg-blue-100 text-blue-700'" x-text="(c.db_type||'mssql').toUpperCase()"></span></td>
+                  <td class="td text-sm text-slate-600 font-mono" x-text="c.db&&c.db.server||'—'"></td>
+                  <td class="td text-sm text-slate-600" x-text="c.db&&c.db.database||'—'"></td>
+                  <td class="td"><div class="flex gap-1">
+                    <span x-show="c.notify&&c.notify.teams_webhook" class="badge bg-purple-100 text-purple-700">Teams</span>
+                    <span x-show="c.notify&&c.notify.slack_webhook" class="badge bg-green-100 text-green-700">Slack</span>
+                    <span x-show="!(c.notify&&(c.notify.teams_webhook||c.notify.slack_webhook))" class="text-slate-400 text-xs">—</span>
+                  </div></td>
+                  <td class="td"><div class="flex items-center gap-2 justify-end flex-wrap">
+                    <button class="btn-secondary btn-sm" @click="dbcTestConn(c.id)" :disabled="dbc.testConnLoading">Test</button>
+                    <button class="btn-secondary btn-sm" @click="dbcOpenEdit(c)">Edit</button>
+                    <button class="btn-danger btn-sm" @click="dbcDelete(c.id)">Delete</button>
+                  </div></td>
+                </tr>
+              </template>
+              <tr x-show="dbc.list.length===0"><td class="td text-slate-500 text-sm" colspan="6">No configurations yet.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div x-show="dbc.testConnResult" class="mt-4 p-4 rounded-xl" :class="dbc.testConnResult&&dbc.testConnResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
+          <p class="text-sm" :class="dbc.testConnResult&&dbc.testConnResult.ok?'text-emerald-700':'text-red-700'" x-text="dbc.testConnResult&&dbc.testConnResult.msg"></p>
+        </div>
+      </div>

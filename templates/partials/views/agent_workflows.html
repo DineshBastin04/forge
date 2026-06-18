@@ -1,0 +1,34 @@
+      <!-- ══ AGENT WORKFLOWS ══ -->
+      <div x-show="view==='agent-workflows'">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-lg font-semibold text-slate-800">Agent Workflows</h3>
+          <button class="btn-primary" @click="awOpenCreate()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Agent
+          </button>
+        </div>
+        <div x-show="aw.loading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!aw.loading&&aw.list.length===0" class="card text-slate-500 text-sm">No agent workflows found.</div>
+        <div x-show="!aw.loading&&aw.list.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">ID</th><th class="th">Name</th><th class="th">Description</th><th class="th">YAML Query Config</th><th class="th"></th></tr></thead>
+            <tbody>
+              <template x-for="agent in aw.list" :key="agent.id">
+                <tr>
+                  <td class="td font-mono text-xs text-slate-600" x-text="agent.id"></td>
+                  <td class="td font-medium text-slate-800" x-text="agent.name"></td>
+                  <td class="td text-slate-500 text-sm max-w-lg whitespace-normal break-words" x-text="agent.description||'—'"></td>
+                  <td class="td text-xs text-slate-400 font-mono">
+                    <span x-show="agent.flow_yaml" class="badge bg-indigo-50 text-indigo-700">customized</span>
+                    <span x-show="!agent.flow_yaml" class="badge bg-slate-100 text-slate-500">default</span>
+                  </td>
+                  <td class="td"><div class="flex items-center gap-2 justify-end">
+                    <button class="btn-secondary btn-sm" @click="awOpenEdit(agent)">Edit Flow</button>
+                    <button x-show="!['device_reset','unpick'].includes(agent.id)" class="btn-danger btn-sm" @click="awDelete(agent.id)">Delete</button>
+                  </div></td>
+                </tr>
+              </template>
+            </tbody>
+          </table></div>
+        </div>
+      </div>

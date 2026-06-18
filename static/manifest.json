@@ -1,7 +1,7 @@
 {
-  "name": "Tychons Forge",
-  "short_name": "Tychons Forge",
-  "description": "Tychons Forge — rule-based warehouse automation agents",
+  "name": "Tychons Wi-Agents",
+  "short_name": "Tychons Wi-Agents",
+  "description": "Tychons Wi-Agents — rule-based warehouse automation agents",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#1e3a5f",

@@ -21,7 +21,7 @@ def get_metadata_db_engine():
     conn_str = os.getenv("METADATA_DB_CONN_STR")
     if not conn_str:
         server = os.getenv("METADATA_DB_SERVER", "localhost")
-        database = os.getenv("METADATA_DB_DATABASE", "tychons_forge")
+        database = os.getenv("METADATA_DB_DATABASE", "tychons_wi_agents")
         user = os.getenv("METADATA_DB_USER")
         password = os.getenv("METADATA_DB_PASSWORD")
         driver = os.getenv("METADATA_DB_DRIVER", "SQL Server")

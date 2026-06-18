@@ -112,8 +112,8 @@ def send_test(cfg: dict, channel: str) -> bool:
             return False
         payload = {
             "@type": "MessageCard",
-            "summary": f"Tychons Forge — Test",
-            "sections": [{"activityTitle": "Tychons Forge — Test",
+            "summary": f"Tychons Wi-Agents — Test",
+            "sections": [{"activityTitle": "Tychons Wi-Agents — Test",
                           "activitySubtitle": f"Webhook verified for {db_name}"}],
         }
         return _post(url, payload)
@@ -123,7 +123,7 @@ def send_test(cfg: dict, channel: str) -> bool:
             return False
         payload = {"blocks": [{"type": "section", "text": {
             "type": "mrkdwn",
-            "text": f"*Tychons Forge — Test*\nWebhook verified for {db_name}",
+            "text": f"*Tychons Wi-Agents — Test*\nWebhook verified for {db_name}",
         }}]}
         return _post(url, payload)
     return False

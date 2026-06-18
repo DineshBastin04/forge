@@ -1,0 +1,33 @@
+      <!-- ══ SYSTEM SETTINGS ══ -->
+      <div x-show="view==='system-settings'">
+        <div class="mb-6">
+          <h3 class="text-lg font-semibold text-slate-800 dark:text-white">System Settings</h3>
+          <p class="text-slate-500 dark:text-slate-400 text-sm">Configure system-wide settings and defaults for Tychons Wi-Agents.</p>
+        </div>
+
+        <div class="card max-w-xl">
+          <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-4">Appearance Settings</h4>
+          <div class="space-y-4">
+            <div>
+              <label class="label">Default System Theme</label>
+              <select x-model="settings.default_theme" class="select max-w-xs">
+                <option value="dark">Dark Theme (Cyber-Blue)</option>
+                <option value="light">Light Theme (Crisp Slate)</option>
+              </select>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                This theme will be used as the default for new visitors who have not chosen a personal preference.
+              </p>
+            </div>
+
+            <div class="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+              <button @click="saveSystemSettings()" :disabled="settings.saving" class="btn-primary">
+                <svg x-show="settings.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>

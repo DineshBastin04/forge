@@ -1,0 +1,144 @@
+      <!-- ══ DEVICE RESET ══ -->
+      <div x-show="view==='device-reset'">
+        <div class="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
+          <button class="tab-btn" :class="dr.tab==='scheduler'&&'active'" @click="dr.tab='scheduler'">Scheduler</button>
+          <button class="tab-btn" :class="dr.tab==='scan'&&'active'" @click="dr.tab='scan'">Auto Scan</button>
+          <button class="tab-btn" :class="dr.tab==='manual'&&'active'" @click="dr.tab='manual'">Manual Reset</button>
+          <button class="tab-btn" :class="dr.tab==='logs'&&'active'" @click="dr.tab='logs';drLoadLogs()">Logs</button>
+        </div>
+
+        <div x-show="dr.tab==='scheduler'">
+          <div x-show="dr.schedulerLoading" class="text-slate-500 text-sm p-2">Loading…</div>
+          <div x-show="!dr.schedulerLoading">
+            <div x-show="dr.schedulerInfo" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div class="card">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Status</div>
+                <span class="badge text-sm py-1" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-yellow-100 text-yellow-700'" x-text="dr.schedulerInfo&&(dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'Running':'Paused')"></span>
+              </div>
+              <div class="card">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Interval</div>
+                <div class="text-2xl font-bold text-slate-800 dark:text-slate-100" x-text="dr.schedulerInfo&&dr.schedulerInfo.interval_hours?dr.schedulerInfo.interval_hours+'h':'—'"></div>
+              </div>
+              <div class="card">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Next Run</div>
+                <div class="text-sm text-slate-700" x-text="dr.schedulerInfo&&dr.schedulerInfo.next_run?fmtDate(dr.schedulerInfo.next_run):'—'"></div>
+              </div>
+            </div>
+            <div x-show="!dr.schedulerInfo" class="card text-slate-500 text-sm mb-4">Scheduler not available — agents run on demand.</div>
+            <template x-if="isAdmin()&&dr.schedulerInfo">
+              <div class="flex flex-wrap gap-3 items-end">
+                <button class="btn-secondary" @click="drToggle()" x-text="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'⏸ Pause':'▶ Resume'"></button>
+                <form class="flex gap-2 items-end" @submit.prevent="drSetInterval()">
+                  <div><label class="label">Set Interval (hours)</label><input x-model="dr.intervalInput" type="number" step="0.25" min="0.25" max="168" class="input w-36" placeholder="e.g. 2"></div>
+                  <button type="submit" class="btn-secondary">Apply</button>
+                </form>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="dr.tab==='scan'">
+          <div class="card mb-4">
+            <div class="grid grid-cols-1 sm:flex sm:items-end gap-3">
+              <div class="w-full sm:flex-1"><label class="label">Database</label><select x-model="dr.scanDbId" class="select"><option value="">Select database…</option><template x-for="db in dbConfigs" :key="db.id"><option :value="db.id" x-text="db.name||db.id"></option></template></select></div>
+              <button class="btn-primary w-full sm:w-auto justify-center" @click="drAutoScan()" :disabled="dr.scanLoading||!dr.scanDbId">
+                <svg x-show="dr.scanLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="dr.scanLoading?'Scanning…':'Scan Now'"></span>
+              </button>
+              <button x-show="dr.scanResults.length>0" class="btn-primary w-full sm:w-auto justify-center" @click="drExecuteSelected()" :disabled="dr.execLoading||drSelectedCount()===0" style="background:#059669">
+                <svg x-show="dr.execLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="dr.execLoading?'Executing…':'Execute Selected ('+drSelectedCount()+')'"></span>
+              </button>
+            </div>
+          </div>
+          <div x-show="dr.scanResults.length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-4">
+            <div class="overflow-x-auto"><table class="min-w-full">
+              <thead><tr><th class="th w-10"><input type="checkbox" @change="drToggleAll($event.target.checked)" class="rounded"></th><th class="th">Device ID</th></tr></thead>
+              <tbody><template x-for="(r,i) in dr.scanResults" :key="i"><tr><td class="td"><input type="checkbox" x-model="r._selected" class="rounded"></td><td class="td font-mono text-sm" x-text="r.device_id"></td></tr></template></tbody>
+            </table></div>
+          </div>
+          <div x-show="dr.execResults.length>0">
+            <div class="flex gap-3 mb-3">
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <span class="text-2xl font-bold text-emerald-700" x-text="dr.execResults.filter(r=>r.status==='SUCCESS').length"></span>
+                <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Success</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <span class="text-2xl font-bold text-amber-700" x-text="dr.execResults.filter(r=>r.status==='WARNING').length"></span>
+                <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Warning</span>
+              </div>
+              <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
+                <span class="text-2xl font-bold text-red-700" x-text="dr.execResults.filter(r=>r.status==='ERROR').length"></span>
+                <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div class="overflow-x-auto"><table class="min-w-full">
+                <thead><tr><th class="th">Device ID</th><th class="th">Status</th><th class="th">Message</th></tr></thead>
+                <tbody><template x-for="(r,i) in dr.execResults" :key="i"><tr><td class="td font-mono text-sm" x-text="r.device_id"></td><td class="td"><span class="badge" :class="statusBadge(r.status)" x-text="r.status"></span></td><td class="td text-sm" x-text="r.message"></td></tr></template></tbody>
+              </table></div>
+            </div>
+          </div>
+        </div>
+
+        <div x-show="dr.tab==='manual'">
+          <div class="card max-w-lg">
+            <h3 class="font-semibold text-slate-800 mb-4">Manual Device Reset</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="label">Database</label>
+                <select x-model="dr.manualDbId" class="select">
+                  <option value="">Select database…</option>
+                  <template x-for="db in dbConfigs" :key="db.id"><option :value="db.id" x-text="db.name||db.id"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label">Device ID</label>
+                <input x-model="dr.manualDeviceId" class="input" placeholder="e.g. RF001" @keydown.enter="drManualReset()">
+              </div>
+              <button class="btn-primary w-full sm:w-auto justify-center" @click="drManualReset()" :disabled="dr.manualLoading||!dr.manualDbId||!dr.manualDeviceId.trim()">
+                <svg x-show="dr.manualLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="dr.manualLoading?'Resetting…':'Execute Reset'"></span>
+              </button>
+            </div>
+            <template x-if="dr.manualResult">
+              <div class="mt-5 p-4 rounded-xl" :class="dr.manualResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
+                <template x-if="dr.manualResult.ok">
+                  <ul class="space-y-1.5">
+                    <template x-for="s in dr.manualResult.steps"><li class="flex items-start gap-2 text-sm text-emerald-700"><span class="mt-0.5">✓</span><span x-text="s"></span></li></template>
+                  </ul>
+                </template>
+                <template x-if="!dr.manualResult.ok"><p class="text-sm text-red-700" x-text="dr.manualResult.message"></p></template>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="dr.tab==='logs'">
+          <div class="flex items-center gap-3 mb-4 flex-wrap">
+            <button class="btn-secondary btn-sm" @click="drLoadLogs()">↻ Refresh</button>
+            <button class="btn-secondary btn-sm" @click="drDownloadLogs('csv')">↓ CSV</button>
+            <button class="btn-secondary btn-sm" @click="drDownloadLogs('txt')">↓ TXT</button>
+            <select x-model="dr.logLevel" class="select btn-sm w-32 font-normal">
+              <option value="">All levels</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+            <input x-model="dr.logSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search logs…">
+            <span class="text-slate-500 text-sm ml-auto" x-text="filteredDrLogs().length+' / '+dr.logs.length+' entries'"></span>
+          </div>
+          <div x-show="dr.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>
+          <div x-show="!dr.logsLoading&&filteredDrLogs().length===0" class="card text-slate-500 text-sm">No matching log entries.</div>
+          <div x-show="!dr.logsLoading&&filteredDrLogs().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto"><table class="min-w-full">
+              <thead><tr><th class="th">Timestamp</th><th class="th">Level</th><th class="th">Device</th><th class="th">Message</th><th class="th">Run ID</th></tr></thead>
+              <tbody>
+                <template x-for="(e,i) in filteredDrLogs()" :key="i">
+                  <tr><td class="td text-xs text-slate-500 whitespace-nowrap" :title="e.timestamp" x-text="relTime(e.timestamp)"></td><td class="td"><span class="badge" :class="levelBadge(e.level)" x-text="e.level"></span></td><td class="td text-xs font-mono" x-text="e.device_id||'—'"></td><td class="td text-sm" x-text="e.message"></td><td class="td text-xs text-slate-400 whitespace-nowrap" x-text="e.run_id"></td></tr>
+                </template>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>

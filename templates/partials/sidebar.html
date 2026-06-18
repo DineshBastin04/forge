@@ -1,0 +1,94 @@
+  <!-- ───── SIDEBAR ───── -->
+  <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+         class="fixed lg:static inset-y-0 left-0 w-64 bg-white dark:bg-[#0a0f1a] border-r border-slate-200/80 dark:border-slate-800/60 flex flex-col z-30 transition-all duration-300 ease-in-out flex-shrink-0 shadow-[2px_0_8px_rgba(0,0,0,0.04)] dark:shadow-[2px_0_12px_rgba(0,0,0,0.3)]">
+
+    <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-200/80 dark:border-slate-800/60 flex-shrink-0">
+      <!-- Icon with Blue T and Golden Swoosh -->
+      <div class="w-9 h-9 flex items-center justify-center flex-shrink-0">
+        <svg viewBox="0 0 50 50" class="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <text x="14" y="36" font-family="'Inter', 'sans-serif'" font-weight="900" font-size="34" fill="#3b82f6">T</text>
+          <path d="M 6 36 C 20 44, 32 38, 44 24 C 32 33, 20 36, 6 36 Z" fill="#e5a913" />
+        </svg>
+      </div>
+      <div>
+        <div class="text-slate-800 dark:text-white font-semibold text-sm">Tychons Wi-Agents</div>
+        <div class="text-slate-400 dark:text-slate-500 text-xs">Automation Platform</div>
+      </div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto py-3 px-3">
+      <div>
+        <button class="sidebar-link" :class="view==='dashboard'&&'active'" @click="nav('dashboard')">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          Dashboard
+        </button>
+      </div>
+      <div class="mt-2">
+        <div class="sidebar-section">Agents</div>
+        <template x-for="agent in registeredAgents" :key="agent.id">
+          <template x-if="hasAgentPerm(agent.id) && ['device_reset', 'unpick'].includes(agent.id)">
+            <button class="sidebar-link" :class="view===(agent.id==='device_reset'?'device-reset':agent.id)&&'active'" @click="nav(agent.id==='device_reset'?'device-reset':agent.id)">
+              <svg x-show="agent.id==='device_reset'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <svg x-show="agent.id==='unpick'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span class="flex-1" x-text="agent.name"></span>
+              <template x-if="agent.id==='device_reset'">
+                <span x-show="dr.schedulerInfo" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+              </template>
+              <template x-if="agent.id==='unpick'">
+                <span x-show="up.schedulerInfo" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+              </template>
+            </button>
+          </template>
+        </template>
+      </div>
+
+      <div class="mt-4">
+        <div class="sidebar-section">Personal</div>
+        <button class="sidebar-link" :class="view==='my-history'&&'active'" @click="nav('my-history')">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          My History
+        </button>
+      </div>
+
+      <template x-if="isAdmin()">
+        <div class="mt-4">
+          <div class="sidebar-section">Administration</div>
+          <button class="sidebar-link" :class="view==='users'&&'active'" @click="nav('users')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+            Users
+          </button>
+          <button x-show="isSuperadmin()" class="sidebar-link" :class="view==='agent-workflows'&&'active'" @click="nav('agent-workflows')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            Agent Workflows
+          </button>
+          <button class="sidebar-link" :class="view==='db-config'&&'active'" @click="nav('db-config')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+            DB Configurations
+          </button>
+          <button class="sidebar-link" :class="view==='audit-logs'&&'active'" @click="nav('audit-logs')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Audit Logs
+          </button>
+          <button x-show="isSuperadmin()" class="sidebar-link" :class="view==='system-settings'&&'active'" @click="nav('system-settings')">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+            System Settings
+          </button>
+        </div>
+      </template>
+    </nav>
+
+    <div class="border-t border-slate-200/80 dark:border-slate-800/60 p-3 flex-shrink-0">
+      <button @click="openProfile()" class="flex items-center gap-3 w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors text-left">
+        <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold" x-text="userInitials(user)"></div>
+        <div class="min-w-0 flex-1">
+          <div class="text-slate-800 dark:text-slate-200 text-sm font-medium truncate" x-text="user&&(user.display_name||user.username)"></div>
+          <div class="text-slate-400 dark:text-slate-500 text-xs capitalize" x-text="user&&user.role"></div>
+        </div>
+        <svg class="w-4 h-4 text-slate-400 dark:text-slate-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+      </button>
+      <button @click="logout()" class="sidebar-link mt-1 hover:text-red-400">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        Sign out
+      </button>
+    </div>
+  </aside>
