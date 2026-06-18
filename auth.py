@@ -1,4 +1,6 @@
 import os
+import re
+import yaml
 import json
 import pyodbc
 import logging
@@ -6,7 +8,7 @@ from datetime import datetime
 from functools import wraps
 
 import bcrypt
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, has_request_context
 from flask_login import (
     LoginManager, UserMixin,
     login_user, logout_user, login_required, current_user,
@@ -171,6 +173,59 @@ def init_db():
         """)
         conn.commit()
         logger.info("Created audit_logs table.")
+
+    # Ensure agents table exists
+    agents_exists = conn.execute(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'agents'"
+    ).fetchone()[0] > 0
+    if not agents_exists:
+        conn.execute("""
+            CREATE TABLE agents (
+                id          NVARCHAR(50) PRIMARY KEY,
+                name        NVARCHAR(100) NOT NULL,
+                description NVARCHAR(255),
+                flow_yaml   NVARCHAR(MAX)
+            )
+        """)
+        conn.commit()
+        logger.info("Created agents table.")
+
+    # Populate default agents if empty
+    if conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0:
+        device_reset_yaml = """queries:
+  auto_scan: "SELECT device_id FROM t_log_message WHERE details LIKE '%Data Error%' AND device_id IS NOT NULL AND user_id IS NOT NULL AND logged_on_utc >= DATEADD(HOUR, -2, GETUTCDATE()) AND logged_on_utc < GETUTCDATE()"
+  find_employee: "SELECT id FROM t_employee WHERE device = :dev"
+  find_location: "SELECT wh_id, location_id FROM t_location WHERE c1 = :emp"
+  check_stored_item: "SELECT 1 FROM t_stored_item WHERE location_id = :l AND wh_id = :w"
+  check_hu_master: "SELECT 1 FROM t_hu_master WHERE location_id = :l AND wh_id = :w"
+  find_staging: "SELECT TOP 1 tl.location_id FROM t_location tl (NOLOCK) WHERE tl.wh_id = :wh AND (tl.status = 'E' OR tl.status = 'P') AND tl.type = 'S' AND (tl.description LIKE '%STAGE%' OR tl.description LIKE '%STAGING%') AND NOT EXISTS (SELECT 1 FROM t_stored_item si WHERE si.location_id = tl.location_id AND si.wh_id = tl.wh_id) AND NOT EXISTS (SELECT 1 FROM t_hu_master hm WHERE hm.location_id = tl.location_id AND hm.wh_id = tl.wh_id) ORDER BY tl.status ASC, ISNULL(tl.stored_qty, 0) ASC"
+  update_employee: "UPDATE t_employee SET device = NULL WHERE id = :id AND wh_id = :wh AND device = :dev"
+  update_location: "UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = :loc AND wh_id = :wh"
+"""
+        unpick_yaml = """queries:
+  check_item_indicator: "SELECT item_hu_indicator FROM t_location WHERE wh_id = :wh AND location_id = :loc"
+  check_stored_item: "SELECT 1 FROM t_stored_item WHERE wh_id = :wh AND item_number = :item AND type = 'STORAGE' AND location_id = :loc"
+  update_stored_qty_add: "UPDATE t_stored_item SET actual_qty = actual_qty + :qty WHERE wh_id = :wh AND item_number = :item AND type = 'STORAGE' AND location_id = :loc"
+  update_stored_qty_move: "UPDATE t_stored_item SET type = 'STORAGE', location_id = :loc, actual_qty = :qty WHERE wh_id = :wh AND item_number = :item AND type = :old_type"
+  update_stored_qty_sub: "UPDATE t_stored_item SET actual_qty = actual_qty - :qty WHERE wh_id = :wh AND item_number = :item AND type = :old_type"
+  delete_empty_stored_item: "DELETE FROM t_stored_item WHERE wh_id = :wh AND item_number = :item AND type = :old_type AND actual_qty <= 0"
+  find_hu_id: "SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = :wh AND item_number = :item AND storage_type = :old_type"
+  update_hu_qty_sub: "UPDATE t_hu_detail SET actual_qty = actual_qty - :qty WHERE wh_id = :wh AND hu_id = :hu AND item_number = :item AND storage_type = :old_type"
+  delete_empty_hu_detail: "DELETE FROM t_hu_detail WHERE wh_id = :wh AND hu_id = :hu AND item_number = :item AND storage_type = :old_type AND actual_qty <= 0"
+  check_hu_detail: "SELECT 1 FROM t_hu_detail WHERE wh_id = :wh AND hu_id = :hu"
+  delete_empty_hu_master: "DELETE FROM t_hu_master WHERE wh_id = :wh AND hu_id = :hu"
+  update_work_q: "UPDATE t_work_q SET work_status = CASE WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id AND pd.picked_quantity < pd.qty) THEN 'R' ELSE 'C' END WHERE work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :order AND wh_id = :wh AND item_number = :item)"
+"""
+        conn.execute(
+            "INSERT INTO agents (id, name, description, flow_yaml) VALUES (?, ?, ?, ?)",
+            ("device_reset", "Device Reset", "Auto-scans and resets stuck devices on the warehouse floor", device_reset_yaml)
+        )
+        conn.execute(
+            "INSERT INTO agents (id, name, description, flow_yaml) VALUES (?, ?, ?, ?)",
+            ("unpick", "Unpick Agent", "Manages manual, partial, and automated inventory unpicks", unpick_yaml)
+        )
+        conn.commit()
+        logger.info("Pre-populated agents table with default configurations.")
 
     conn.close()
 
@@ -494,8 +549,6 @@ def download_audit_logs():
         return response
 
 
-from flask import has_request_context
-
 def log_audit_action(username: str, action: str, target: str, details: dict):
     try:
         enriched_details = dict(details)
@@ -513,4 +566,188 @@ def log_audit_action(username: str, action: str, target: str, details: dict):
         conn.close()
     except Exception as e:
         logger.error("Failed to log audit action: %s", e)
+
+
+def load_agent_queries(agent_id, default_queries):
+    try:
+        conn = _get_conn()
+        row = conn.execute("SELECT flow_yaml FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        conn.close()
+        if row and row[0]:
+            data = yaml.safe_load(row[0]) or {}
+            queries = data.get("queries", {})
+            merged = dict(default_queries)
+            for k, v in queries.items():
+                if v is not None:
+                    merged[k] = v
+            return merged
+    except Exception as e:
+        logger.warning("Could not load dynamic queries for agent %s: %s", agent_id, e)
+    return default_queries
+
+
+def execute_dynamic_query(conn_or_cursor, query, params):
+    """
+    Executes a query dynamically.
+    If conn_or_cursor is a pyodbc Cursor, converts named params (:name) to ? and executes.
+    If conn_or_cursor is a SQLAlchemy Connection, wraps query in text() and executes.
+    """
+    type_str = str(type(conn_or_cursor))
+    if "cursor" in type_str.lower():
+        # Convert named parameters (:param) to ?
+        pattern = r':([a-zA-Z0-9_]+)'
+        keys = re.findall(pattern, query)
+        q_converted = re.sub(pattern, '?', query)
+        ordered_values = [params.get(k) for k in keys]
+        return conn_or_cursor.execute(q_converted, ordered_values)
+    else:
+        # SQLAlchemy Connection
+        from sqlalchemy import text as _text
+        return conn_or_cursor.execute(_text(query), params)
+
+
+@bp.route("/api/v0/agents", methods=["GET"])
+@login_required
+def list_agents_public():
+    conn = _get_conn()
+    rows = conn.execute("SELECT id, name, description, flow_yaml FROM agents ORDER BY id").fetchall()
+    conn.close()
+    return jsonify({"agents": [
+        {"id": r[0], "name": r[1], "description": r[2], "flow_yaml": r[3]}
+        for r in rows
+    ]})
+
+
+@bp.route("/api/v0/admin/agents", methods=["POST"])
+def create_agent():
+    from auth import superadmin_required_check
+    err = superadmin_required_check()
+    if err: return err
+
+    data = request.get_json() or {}
+    agent_id = data.get("id", "").strip().lower()
+    name = data.get("name", "").strip()
+    description = data.get("description", "").strip()
+    flow_yaml = data.get("flow_yaml", "").strip()
+
+    if not agent_id or not name:
+        return jsonify({"type": "error", "error": "id and name are required"}), 400
+    if not re.match(r'^[a-z0-9_]{3,50}$', agent_id):
+        return jsonify({"type": "error", "error": "ID must be 3-50 alphanumeric characters or underscores"}), 400
+
+    if flow_yaml:
+        try:
+            yaml.safe_load(flow_yaml)
+        except Exception as e:
+            return jsonify({"type": "error", "error": f"Invalid YAML syntax: {e}"}), 400
+
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO agents (id, name, description, flow_yaml) VALUES (?, ?, ?, ?)",
+            (agent_id, name, description, flow_yaml)
+        )
+        conn.commit()
+        log_audit_action(current_user.username, "CREATE_AGENT", agent_id, {"name": name, "description": description})
+    except Exception as e:
+        conn.close()
+        if "UNIQUE" in str(e).upper() or "PRIMARY KEY" in str(e).upper():
+            return jsonify({"type": "error", "error": "Agent ID already exists"}), 409
+        raise
+    conn.close()
+    return jsonify({"type": "success"}), 201
+
+
+@bp.route("/api/v0/admin/agents/<string:agent_id>", methods=["PATCH"])
+def update_agent(agent_id):
+    from auth import superadmin_required_check
+    err = superadmin_required_check()
+    if err: return err
+
+    data = request.get_json() or {}
+    name = data.get("name", "").strip()
+    description = data.get("description", "").strip()
+    flow_yaml = data.get("flow_yaml")
+
+    conn = _get_conn()
+    row = conn.execute("SELECT id, name, description FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"type": "error", "error": "Agent not found"}), 404
+
+    if flow_yaml is not None:
+        flow_yaml = flow_yaml.strip()
+        try:
+            yaml.safe_load(flow_yaml)
+        except Exception as e:
+            conn.close()
+            return jsonify({"type": "error", "error": f"Invalid YAML syntax: {e}"}), 400
+
+    updates, params = [], []
+    if name:
+        updates.append("name = ?"); params.append(name)
+    if description:
+        updates.append("description = ?"); params.append(description)
+    if flow_yaml is not None:
+        updates.append("flow_yaml = ?"); params.append(flow_yaml)
+
+    if updates:
+        params.append(agent_id)
+        conn.execute(f"UPDATE agents SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+        log_audit_action(current_user.username, "UPDATE_AGENT", agent_id, {"name": name, "description": description})
+    conn.close()
+    return jsonify({"type": "success"})
+
+
+@bp.route("/api/v0/admin/agents/<string:agent_id>", methods=["DELETE"])
+def delete_agent(agent_id):
+    from auth import superadmin_required_check
+    err = superadmin_required_check()
+    if err: return err
+
+    if agent_id in ("device_reset", "unpick"):
+        return jsonify({"type": "error", "error": "Cannot delete core system agents"}), 400
+
+    conn = _get_conn()
+    row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"type": "error", "error": "Agent not found"}), 404
+
+    conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
+    conn.commit()
+    conn.close()
+
+    log_audit_action(current_user.username, "DELETE_AGENT", agent_id, {})
+    return jsonify({"type": "success"})
+
+
+@bp.route("/api/v0/auth/my_history", methods=["GET"])
+@login_required
+def get_my_history():
+    conn = _get_conn()
+    cursor = conn.execute(
+        "SELECT id, username, timestamp, action, target, details FROM audit_logs WHERE username = ? ORDER BY id DESC",
+        (current_user.username,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    logs = []
+    for r in rows:
+        try:
+            details = json.loads(r[5])
+        except Exception:
+            details = {"raw": r[5]}
+        logs.append({
+            "id": r[0],
+            "username": r[1],
+            "timestamp": r[2],
+            "action": r[3],
+            "target": r[4],
+            "details": details
+        })
+    return jsonify({"audit_logs": logs})
+
 

@@ -49,8 +49,8 @@ def create_user():
 
     if not username or not password:
         return jsonify({"type": "error", "error": "username and password required"}), 400
-    if role == "superadmin" and not current_user.is_superadmin():
-        return jsonify({"type": "error", "error": "Only superadmin can assign superadmin role"}), 403
+    if role in ("admin", "superadmin") and not current_user.is_superadmin():
+        return jsonify({"type": "error", "error": "Only superadmin can manage admin/superadmin accounts"}), 403
     if role not in VALID_ROLES:
         return jsonify({"type": "error", "error": f"role must be one of: {', '.join(VALID_ROLES)}"}), 400
 
@@ -91,6 +91,10 @@ def update_user(user_id):
 
     # Fetch before state
     row_before = conn.execute("SELECT username, role, agent_perms, is_active, display_name FROM users WHERE id = ?", (user_id,)).fetchone()
+    target_role = row_before[1]
+    if target_role in ("admin", "superadmin") and not current_user.is_superadmin():
+        conn.close()
+        return jsonify({"type": "error", "error": "Only superadmin can manage admin/superadmin accounts"}), 403
 
     updates, params = [], []
 
@@ -101,9 +105,9 @@ def update_user(user_id):
 
     if "role" in data:
         new_role = data["role"]
-        if new_role == "superadmin" and not current_user.is_superadmin():
+        if new_role in ("admin", "superadmin") and not current_user.is_superadmin():
             conn.close()
-            return jsonify({"type": "error", "error": "Only superadmin can assign superadmin role"}), 403
+            return jsonify({"type": "error", "error": "Only superadmin can assign admin/superadmin roles"}), 403
         if new_role not in VALID_ROLES:
             conn.close()
             return jsonify({"type": "error", "error": f"role must be one of: {', '.join(VALID_ROLES)}"}), 400
@@ -150,8 +154,14 @@ def deactivate_user(user_id):
     if user_id == current_user.id:
         return jsonify({"type": "error", "error": "Cannot deactivate your own account"}), 400
     conn = _get_conn()
-    row = conn.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
-    username_target = row[0] if row else str(user_id)
+    row = conn.execute("SELECT username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"type": "error", "error": "User not found"}), 404
+    username_target, target_role = row[0], row[1]
+    if target_role in ("admin", "superadmin") and not current_user.is_superadmin():
+        conn.close()
+        return jsonify({"type": "error", "error": "Only superadmin can manage admin/superadmin accounts"}), 403
     conn.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
     conn.commit()
     from auth import log_audit_action
@@ -169,10 +179,13 @@ def deactivate_user(user_id):
 @admin_required
 def get_user_perms(user_id):
     conn = _get_conn()
-    row = conn.execute("SELECT agent_perms FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT agent_perms, role FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     if not row:
         return jsonify({"type": "error", "error": "User not found"}), 404
+    target_role = row[1]
+    if target_role in ("admin", "superadmin") and not current_user.is_superadmin():
+        return jsonify({"type": "error", "error": "Only superadmin can manage admin/superadmin accounts"}), 403
     return jsonify({"perms": json.loads(row[0] or "[]")})
 
 
@@ -182,12 +195,14 @@ def set_user_perms(user_id):
     data  = request.get_json() or {}
     perms = data.get("perms", [])
     conn  = _get_conn()
-    row_before = conn.execute("SELECT username, agent_perms FROM users WHERE id = ?", (user_id,)).fetchone()
+    row_before = conn.execute("SELECT username, agent_perms, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not row_before:
         conn.close()
         return jsonify({"type": "error", "error": "User not found"}), 404
-    username_target = row_before[0]
-    before_perms = json.loads(row_before[1] or "[]")
+    username_target, before_perms, target_role = row_before[0], json.loads(row_before[1] or "[]"), row_before[2]
+    if target_role in ("admin", "superadmin") and not current_user.is_superadmin():
+        conn.close()
+        return jsonify({"type": "error", "error": "Only superadmin can manage admin/superadmin accounts"}), 403
 
     conn.execute("UPDATE users SET agent_perms = ? WHERE id = ?", (json.dumps(perms), user_id))
     conn.commit()

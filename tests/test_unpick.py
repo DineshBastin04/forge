@@ -5,6 +5,7 @@ from agents.unpick import _do_unpick_pyodbc, _do_manual_unpick_pyodbc
 def test_unpick_success():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock sequence of fetchone calls:
@@ -34,6 +35,7 @@ def test_unpick_success():
 def test_unpick_zero_quantity():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock picked_quantity -> (0.0,)
@@ -50,6 +52,7 @@ def test_unpick_zero_quantity():
 def test_unpick_qty_exceeds_picked():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock picked_quantity -> (5.0,)
@@ -67,6 +70,7 @@ def test_unpick_qty_exceeds_picked():
 def test_unpick_missing_location():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # 1. picked_quantity -> (10.0,)
@@ -91,6 +95,7 @@ def test_unpick_missing_location():
 def test_unpick_db_error_triggers_rollback():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Force an exception on execute
@@ -107,6 +112,7 @@ def test_unpick_db_error_triggers_rollback():
 def test_manual_unpick_success_item_controlled():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock sequence of fetchone calls:
@@ -136,6 +142,7 @@ def test_manual_unpick_success_item_controlled():
 def test_manual_unpick_success_lp_single_item():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock sequence of fetchone calls:
@@ -167,6 +174,7 @@ def test_manual_unpick_success_lp_single_item():
 def test_manual_unpick_success_lp_multi_item():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # Mock sequence of fetchone calls:
@@ -196,6 +204,7 @@ def test_manual_unpick_success_lp_multi_item():
 def test_manual_unpick_missing_location():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     # 1. sys.columns check -> (1,)
@@ -218,6 +227,7 @@ def test_manual_unpick_missing_location():
 def test_manual_unpick_db_error_triggers_rollback():
     conn = MagicMock()
     cursor = MagicMock()
+    cursor.execute.return_value = cursor
     conn.cursor.return_value = cursor
 
     cursor.execute.side_effect = Exception("Connection lost")
