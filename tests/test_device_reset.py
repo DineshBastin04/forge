@@ -279,3 +279,137 @@ def test_reset_all_with_dual_db(mock_get_engine, mock_get_config, mock_reset_dev
 
     # Verify reset engine was executed on the operational database engine
     mock_reset_device_engine.assert_called_once_with(mock_ops_engine, "DEV001", "RUN001")
+
+
+@patch("agents.device_reset.get_config")
+@patch("agents.device_reset.get_engine")
+@patch("agents.device_reset.load_agent_queries")
+def test_manual_reset_by_employee_success(mock_load_queries, mock_get_engine, mock_get_config, app, client):
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.get_id.return_value = "1"
+    user.has_agent_perm.return_value = True
+    user.username = "testadmin"
+
+    app.config["test_users"] = {"1": user}
+    with client.session_transaction() as sess:
+        sess["_user_id"] = "1"
+
+    mock_get_config.return_value = {"name": "TestDB", "db_type": "mssql"}
+
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    
+    mock_get_engine.return_value = mock_engine
+    mock_engine.raw_connection.return_value = mock_conn
+    mock_conn.cursor.return_value = mock_cursor
+
+    mock_load_queries.return_value = {
+        "find_employee": "SELECT id FROM t_employee WHERE device = :dev",
+        "find_employee_by_id": "SELECT id FROM t_employee WHERE id = :id",
+        "find_device_by_employee": "SELECT device FROM t_employee WHERE id = :id",
+        "find_location": "SELECT wh_id, location_id FROM t_location WHERE c1 = :emp",
+        "check_stored_item": "SELECT 1 FROM t_stored_item WHERE location_id = :l AND wh_id = :w",
+        "check_hu_master": "SELECT 1 FROM t_hu_master WHERE location_id = :l AND wh_id = :w",
+        "find_staging": "SELECT TOP 1 location_id FROM t_location WHERE status = 'E'",
+        "update_employee": "UPDATE t_employee SET device = NULL WHERE id = :id",
+        "update_location": "UPDATE t_location SET c1 = NULL WHERE location_id = :loc"
+    }
+
+    # Sequence of fetchone results:
+    # 1. find_employee (lookup by device) -> None (not found)
+    # 2. find_employee_by_id (lookup by employee) -> ("EMP123",)
+    # 3. find_device_by_employee -> ("DEV999",)
+    # 4. find_location -> ("WH1", "LOC-FORK")
+    # 5. check_stored_item -> None (no inventory)
+    # 6. check_hu_master -> None (no inventory)
+    mock_cursor.fetchone.side_effect = [
+        None,
+        ("EMP123",),
+        ("DEV999",),
+        ("WH1", "LOC-FORK"),
+        None,
+        None
+    ]
+
+    payload = {
+        "db_config_id": "TestDB",
+        "device_id": "EMP123",
+        "input_type": "employee"
+    }
+    res = client.post("/api/v0/device_reset_agent/manual_reset", json=payload)
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["type"] == "success"
+    
+    assert mock_cursor.execute.call_count >= 8
+    mock_conn.commit.assert_called_once()
+
+
+@patch("agents.device_reset.get_config")
+@patch("agents.device_reset.get_engine")
+@patch("agents.device_reset.load_agent_queries")
+def test_manual_reset_by_employee_no_device(mock_load_queries, mock_get_engine, mock_get_config, app, client):
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.get_id.return_value = "1"
+    user.has_agent_perm.return_value = True
+    user.username = "testadmin"
+
+    app.config["test_users"] = {"1": user}
+    with client.session_transaction() as sess:
+        sess["_user_id"] = "1"
+
+    mock_get_config.return_value = {"name": "TestDB", "db_type": "mssql"}
+
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    
+    mock_get_engine.return_value = mock_engine
+    mock_engine.raw_connection.return_value = mock_conn
+    mock_conn.cursor.return_value = mock_cursor
+
+    mock_load_queries.return_value = {
+        "find_employee": "SELECT id FROM t_employee WHERE device = :dev",
+        "find_employee_by_id": "SELECT id FROM t_employee WHERE id = :id",
+        "find_device_by_employee": "SELECT device FROM t_employee WHERE id = :id",
+        "find_location": "SELECT wh_id, location_id FROM t_location WHERE c1 = :emp",
+        "check_stored_item": "SELECT 1 FROM t_stored_item WHERE location_id = :l AND wh_id = :w",
+        "check_hu_master": "SELECT 1 FROM t_hu_master WHERE location_id = :l AND wh_id = :w",
+        "find_staging": "SELECT TOP 1 location_id FROM t_location WHERE status = 'E'",
+        "update_employee": "UPDATE t_employee SET device = NULL WHERE id = :id",
+        "update_location": "UPDATE t_location SET c1 = NULL WHERE location_id = :loc"
+    }
+
+    # Sequence of fetchone results:
+    # 1. find_employee (lookup by device) -> None (not found)
+    # 2. find_employee_by_id (lookup by employee) -> ("EMP123",)
+    # 3. find_device_by_employee -> None (no device assigned)
+    # 4. find_location -> ("WH1", "LOC-FORK")
+    # 5. check_stored_item -> None (no inventory)
+    # 6. check_hu_master -> None (no inventory)
+    mock_cursor.fetchone.side_effect = [
+        None,
+        ("EMP123",),
+        None,
+        ("WH1", "LOC-FORK"),
+        None,
+        None
+    ]
+
+    payload = {
+        "db_config_id": "TestDB",
+        "device_id": "EMP123",
+        "input_type": "employee"
+    }
+    res = client.post("/api/v0/device_reset_agent/manual_reset", json=payload)
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["type"] == "success"
+    
+    assert mock_cursor.execute.call_count >= 7
+    mock_conn.commit.assert_called_once()

@@ -221,10 +221,10 @@ def init_db():
         conn.execute(
             "INSERT INTO users (username, password_hash, role, agent_perms, is_active, created_at, display_name, force_change_password)"
             " VALUES (?, ?, 'superadmin', '[]', 1, ?, 'Administrator', 1)",
-            ("admin", pw_hash, datetime.utcnow().isoformat()),
+            ("superadmin", pw_hash, datetime.utcnow().isoformat()),
         )
         conn.commit()
-        logger.warning("Default superadmin created — login: admin / change-me.")
+        logger.warning("Default superadmin created — login: superadmin / change-me.")
 
     # Ensure job_logs table exists
     job_logs_exists = conn.execute(
@@ -282,9 +282,7 @@ def init_db():
         conn.commit()
         logger.info("Created agents table.")
 
-    # Populate default agents if empty
-    if conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0:
-        device_reset_yaml = """queries:
+    device_reset_yaml = """queries:
   auto_scan: "SELECT device_id FROM t_log_message WHERE details LIKE '%Data Error%' AND device_id IS NOT NULL AND user_id IS NOT NULL AND logged_on_utc >= DATEADD(HOUR, -2, GETUTCDATE()) AND logged_on_utc < GETUTCDATE()"
   find_employee: "SELECT id FROM t_employee WHERE device = :dev"
   find_location: "SELECT wh_id, location_id FROM t_location WHERE c1 = :emp"
@@ -293,21 +291,58 @@ def init_db():
   find_staging: "SELECT TOP 1 tl.location_id FROM t_location tl (NOLOCK) WHERE tl.wh_id = :wh AND (tl.status = 'E' OR tl.status = 'P') AND tl.type = 'S' AND (tl.description LIKE '%STAGE%' OR tl.description LIKE '%STAGING%') AND NOT EXISTS (SELECT 1 FROM t_stored_item si WHERE si.location_id = tl.location_id AND si.wh_id = tl.wh_id) AND NOT EXISTS (SELECT 1 FROM t_hu_master hm WHERE hm.location_id = tl.location_id AND hm.wh_id = tl.wh_id) ORDER BY tl.status ASC, ISNULL(tl.stored_qty, 0) ASC"
   update_employee: "UPDATE t_employee SET device = NULL WHERE id = :id AND wh_id = :wh AND device = :dev"
   update_location: "UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = :loc AND wh_id = :wh"
+  find_employee_by_id: "SELECT id FROM t_employee WHERE id = :id"
+  find_device_by_employee: "SELECT device FROM t_employee WHERE id = :id"
 """
-        unpick_yaml = """queries:
-  check_item_indicator: "SELECT item_hu_indicator FROM t_location WHERE wh_id = :wh AND location_id = :loc"
-  check_stored_item: "SELECT 1 FROM t_stored_item WHERE wh_id = :wh AND item_number = :item AND type = 'STORAGE' AND location_id = :loc"
-  update_stored_qty_add: "UPDATE t_stored_item SET actual_qty = actual_qty + :qty WHERE wh_id = :wh AND item_number = :item AND type = 'STORAGE' AND location_id = :loc"
-  update_stored_qty_move: "UPDATE t_stored_item SET type = 'STORAGE', location_id = :loc, actual_qty = :qty WHERE wh_id = :wh AND item_number = :item AND type = :old_type"
-  update_stored_qty_sub: "UPDATE t_stored_item SET actual_qty = actual_qty - :qty WHERE wh_id = :wh AND item_number = :item AND type = :old_type"
-  delete_empty_stored_item: "DELETE FROM t_stored_item WHERE wh_id = :wh AND item_number = :item AND type = :old_type AND actual_qty <= 0"
-  find_hu_id: "SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = :wh AND item_number = :item AND storage_type = :old_type"
-  update_hu_qty_sub: "UPDATE t_hu_detail SET actual_qty = actual_qty - :qty WHERE wh_id = :wh AND hu_id = :hu AND item_number = :item AND storage_type = :old_type"
-  delete_empty_hu_detail: "DELETE FROM t_hu_detail WHERE wh_id = :wh AND hu_id = :hu AND item_number = :item AND storage_type = :old_type AND actual_qty <= 0"
-  check_hu_detail: "SELECT 1 FROM t_hu_detail WHERE wh_id = :wh AND hu_id = :hu"
-  delete_empty_hu_master: "DELETE FROM t_hu_master WHERE wh_id = :wh AND hu_id = :hu"
-  update_work_q: "UPDATE t_work_q SET work_status = CASE WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id AND pd.picked_quantity < pd.qty) THEN 'R' ELSE 'C' END WHERE work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :order AND wh_id = :wh AND item_number = :item)"
+    unpick_yaml = """queries:
+  auto_scan: "SELECT DISTINCT TL.control_number AS order_number, TL.wh_id, TL.item_number FROM t_tran_log TL WITH(NOLOCK) LEFT JOIN t_pick_detail PD ON PD.order_number = TL.control_number AND PD.wh_id = TL.wh_id AND PD.item_number = TL.item_number AND PD.line_number = TL.line_number LEFT JOIN t_stored_item SI ON SI.wh_id = TL.wh_id AND SI.item_number = TL.item_number AND SI.type = TL.control_number LEFT JOIN t_hu_master HM ON HM.wh_id = TL.wh_id AND HM.hu_id = TL.hu_id LEFT JOIN t_hu_detail HD ON HD.wh_id = TL.wh_id AND HD.hu_id = TL.hu_id AND HD.item_number = TL.item_number LEFT JOIN t_work_q WQ ON WQ.wh_id = TL.wh_id AND WQ.pick_ref_number = TL.control_number AND WQ.item_number = TL.item_number WHERE TL.tran_type = '391' AND TL.description = 'Unload/Unpick (pick)' AND NOT EXISTS (SELECT 1 FROM t_tran_log TL2 WHERE TL2.control_number = TL.control_number AND TL2.wh_id = TL.wh_id AND TL2.item_number = TL.item_number AND TL2.tran_type = '301' AND TL2.description = 'Picking (pick)' AND (CAST(TL2.start_tran_date AS DATETIME) + CAST(TL2.start_tran_time AS DATETIME) > CAST(TL.start_tran_date AS DATETIME) + CAST(TL.start_tran_time AS DATETIME))) AND (ISNULL(PD.picked_quantity, 0) <> 0 OR ISNULL(PD.staged_quantity, 0) <> 0 OR PD.status <> 'RELEASED' OR SI.type <> 'STORAGE' OR SI.location_id <> (SELECT TOP 1 TL_PICK.location_id FROM t_tran_log TL_PICK WHERE TL_PICK.control_number = TL.control_number AND TL_PICK.wh_id = TL.wh_id AND TL_PICK.item_number = TL.item_number AND TL_PICK.tran_type = '301' ORDER BY TL_PICK.start_tran_date DESC, TL_PICK.start_tran_time DESC) OR HM.control_number IS NOT NULL OR HM.type <> 'IV' OR HD.storage_type IS NOT NULL OR WQ.work_status <> 'U')"
+  find_picked_qty: "SELECT picked_quantity FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i"
+  check_columns: "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('t_pick_detail') AND name = 'pick_location'"
+  find_pick_loc: "SELECT pick_location FROM t_pick_detail WHERE wh_id = :w AND order_number = :o AND item_number = :i"
+  find_tran_loc_301: "SELECT TOP 1 location_id FROM t_tran_log WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o ORDER BY start_tran_date DESC, start_tran_time DESC"
+  find_tran_source_loc_301: "SELECT TOP 1 source_location_id FROM t_tran_log WHERE wh_id = :w AND tran_type = '301' AND item_number = :i AND control_number = :o ORDER BY start_tran_date DESC, start_tran_time DESC"
+  update_pick_detail: "UPDATE t_pick_detail SET staged_quantity = CASE WHEN staged_quantity >= :q THEN staged_quantity - :q ELSE 0 END, picked_quantity = picked_quantity - :q, status = CASE WHEN picked_quantity - :q > 0 THEN 'PICKED' ELSE 'RELEASED' END WHERE wh_id = :w AND order_number = :o AND item_number = :i"
+  check_item_indicator: "SELECT item_hu_indicator FROM t_location WHERE wh_id = :w AND location_id = :l"
+  check_stored_item: "SELECT 1 FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l"
+  update_stored_qty_add: "UPDATE t_stored_item SET actual_qty = actual_qty + :q WHERE wh_id = :w AND item_number = :i AND type = 'STORAGE' AND location_id = :l"
+  update_stored_qty_move: "UPDATE t_stored_item SET type = 'STORAGE', location_id = :l, actual_qty = :q WHERE wh_id = :w AND item_number = :i AND type = :o"
+  update_stored_qty_sub: "UPDATE t_stored_item SET actual_qty = actual_qty - :q WHERE wh_id = :w AND item_number = :i AND type = :o"
+  delete_empty_stored_item: "DELETE FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = :o AND actual_qty <= 0"
+  find_hu_id: "SELECT TOP 1 hu_id FROM t_hu_detail WHERE wh_id = :w AND item_number = :i AND storage_type = :o"
+  update_hu_qty_sub: "UPDATE t_hu_detail SET actual_qty = actual_qty - :q WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o"
+  delete_empty_hu_detail: "DELETE FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o AND actual_qty <= 0"
+  check_hu_detail: "SELECT 1 FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h"
+  delete_empty_hu_master: "DELETE FROM t_hu_master WHERE wh_id = :w AND hu_id = :h"
+  update_work_q: "UPDATE t_work_q SET work_status = CASE WHEN EXISTS (SELECT 1 FROM t_pick_detail pd WHERE pd.work_q_id = t_work_q.work_q_id AND pd.picked_quantity >= pd.planned_quantity) THEN 'C' ELSE 'U' END WHERE wh_id = :w AND pick_ref_number = :o AND work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :o AND wh_id = :w AND item_number = :i)"
+  manual_unpick_update_pick: "UPDATE t_pick_detail SET staged_quantity = 0, picked_quantity = 0, status = 'RELEASED' WHERE order_number = :o AND wh_id = :w AND item_number = :i"
+  manual_update_stored_qty_add: "UPDATE S SET S.actual_qty = S.actual_qty + O.actual_qty FROM t_stored_item S JOIN t_stored_item O ON O.wh_id = S.wh_id AND O.item_number = S.item_number WHERE S.wh_id = :w AND S.item_number = :i AND S.type = 'STORAGE' AND O.type = :o"
+  manual_delete_stored_item: "DELETE FROM t_stored_item WHERE wh_id = :w AND item_number = :i AND type = :o"
+  manual_update_stored_item_move: "UPDATE t_stored_item SET type = 'STORAGE', location_id = :l WHERE wh_id = :w AND item_number = :i AND type = :o"
+  manual_delete_hu_detail: "DELETE FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h AND item_number = :i AND storage_type = :o"
+  manual_get_distinct_item_count: "SELECT COUNT(DISTINCT item_number) FROM t_hu_detail WHERE wh_id = :w AND hu_id = :h"
+  manual_insert_hu_master: "INSERT INTO t_hu_master (hu_id, type, control_number, location_id, status, wh_id) VALUES (:h, 'LP', NULL, :l, 'A', :w)"
+  manual_update_hu_detail_multi: "UPDATE t_hu_detail SET hu_id = :nh, storage_type = 'STORAGE', location_id = :l WHERE wh_id = :w AND hu_id = :oh AND item_number = :i"
+  manual_update_work_q: "UPDATE t_work_q SET work_status = 'U' WHERE wh_id = :w AND pick_ref_number = :o AND work_q_id IN (SELECT work_q_id FROM t_pick_detail WHERE order_number = :o AND wh_id = :w AND item_number = :i)"
 """
+
+    # Ensure agents table exists
+    agents_exists = conn.execute(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'agents'"
+    ).fetchone()[0] > 0
+    if not agents_exists:
+        conn.execute("""
+            CREATE TABLE agents (
+                id          NVARCHAR(50) PRIMARY KEY,
+                name        NVARCHAR(100) NOT NULL,
+                description NVARCHAR(255),
+                flow_yaml   NVARCHAR(MAX)
+            )
+        """)
+        conn.commit()
+        logger.info("Created agents table.")
+
+    # Populate default agents if empty
+    if conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0:
         conn.execute(
             "INSERT INTO agents (id, name, description, flow_yaml) VALUES (?, ?, ?, ?)",
             ("device_reset", "Device Reset", "Auto-scans and resets stuck devices on the warehouse floor", device_reset_yaml)
@@ -318,6 +353,19 @@ def init_db():
         )
         conn.commit()
         logger.info("Pre-populated agents table with default configurations.")
+    else:
+        # Check if existing agents need update (migration)
+        for agent_id, default_yaml in [("device_reset", device_reset_yaml), ("unpick", unpick_yaml)]:
+            row = conn.execute("SELECT flow_yaml FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            if row:
+                current_yaml = row[0] or ""
+                if agent_id == "unpick" and "manual_" not in current_yaml:
+                    conn.execute("UPDATE agents SET flow_yaml = ? WHERE id = ?", (default_yaml, agent_id))
+                    logger.info("Updated flow_yaml for %s to include manual unpick queries.", agent_id)
+                elif agent_id == "device_reset" and "find_employee_by_id" not in current_yaml:
+                    conn.execute("UPDATE agents SET flow_yaml = ? WHERE id = ?", (default_yaml, agent_id))
+                    logger.info("Updated flow_yaml for %s to include employee ID search queries.", agent_id)
+        conn.commit()
 
     conn.close()
 

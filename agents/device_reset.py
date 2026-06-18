@@ -38,6 +38,8 @@ DEFAULT_QUERIES = {
     """,
     "update_employee": "UPDATE t_employee SET device = NULL WHERE id = :id AND wh_id = :wh AND device = :dev",
     "update_location": "UPDATE t_location SET c1 = NULL, status = 'E' WHERE location_id = :loc AND wh_id = :wh",
+    "find_employee_by_id": "SELECT id FROM t_employee WHERE id = :id",
+    "find_device_by_employee": "SELECT device FROM t_employee WHERE id = :id",
 }
 
 
@@ -203,6 +205,7 @@ def manual_reset():
     data         = request.get_json() or {}
     db_config_id = data.get("db_config_id", "").strip()
     device_id    = str(data.get("device_id", "")).strip()
+    input_type   = str(data.get("input_type", "device")).strip().lower()
     if not db_config_id or not device_id:
         return jsonify({"type": "error", "error": "db_config_id and device_id required"}), 400
     cfg = get_config(db_config_id)
@@ -210,7 +213,7 @@ def manual_reset():
         return jsonify({"type": "error", "error": "DB config not found"}), 404
 
     run_id = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    log_device_reset("INFO", f"Manual reset started for device {device_id}.", device_id=device_id, run_id=run_id)
+    log_device_reset("INFO", f"Manual reset started for {input_type} {device_id}.", device_id=device_id, run_id=run_id)
 
     conn = None
     try:
@@ -220,18 +223,42 @@ def manual_reset():
         steps = []
         queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
 
-        emp_row = execute_dynamic_query(cursor, queries["find_employee"], {"dev": device_id}).fetchone()
-        if not emp_row:
-            msg = f"No employee record for device {device_id}."
-            log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
-            conn.rollback(); conn.close()
-            return jsonify({"type": "warning", "message": msg})
-        emp_id = emp_row[0]
-        steps.append("Employee record found.")
+        emp_id = None
+        resolved_device_id = None
+
+        if input_type == "device":
+            emp_row = execute_dynamic_query(cursor, queries["find_employee"], {"dev": device_id}).fetchone()
+            if not emp_row:
+                msg = f"No employee record for device {device_id}."
+                log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
+                conn.rollback(); conn.close()
+                return jsonify({"type": "warning", "message": msg})
+            emp_id = emp_row[0]
+            resolved_device_id = device_id
+            steps.append("Resolved input as assigned Device ID. Employee record found.")
+        else:
+            # input_type is "employee"
+            emp_by_id_query = queries.get("find_employee_by_id", "SELECT id FROM t_employee WHERE id = :id")
+            emp_by_id_row = execute_dynamic_query(cursor, emp_by_id_query, {"id": device_id}).fetchone()
+            if not emp_by_id_row:
+                msg = f"No employee record found for Employee ID '{device_id}'."
+                log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
+                conn.rollback(); conn.close()
+                return jsonify({"type": "warning", "message": msg})
+            emp_id = emp_by_id_row[0]
+            steps.append(f"Resolved input as Employee ID. Employee record found for ID: {emp_id}.")
+
+            find_device_query = queries.get("find_device_by_employee", "SELECT device FROM t_employee WHERE id = :id")
+            dev_row = execute_dynamic_query(cursor, find_device_query, {"id": emp_id}).fetchone()
+            resolved_device_id = dev_row[0] if dev_row else None
+            if resolved_device_id:
+                steps.append(f"Found active assigned Device ID: {resolved_device_id}.")
+            else:
+                steps.append("No active device assignment found for employee.")
 
         loc_row = execute_dynamic_query(cursor, queries["find_location"], {"emp": emp_id}).fetchone()
         if not loc_row:
-            msg = "No fork location found."
+            msg = f"No fork location found for employee {emp_id}."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
             conn.rollback(); conn.close()
             return jsonify({"type": "warning", "message": msg})
@@ -260,15 +287,21 @@ def manual_reset():
                 cursor.execute(f"UPDATE {tbl} SET location_id = ? WHERE location_id = ? AND wh_id = ?",
                                (temp_loc, fork_loc, wh_id))
             steps.append(f"Inventory relocated to {temp_loc}.")
-        execute_dynamic_query(cursor, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": device_id})
+
+        if resolved_device_id:
+            execute_dynamic_query(cursor, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": resolved_device_id})
+            steps.append("Device assignment cleared.")
+        else:
+            steps.append("No active device assignment to clear.")
+
         execute_dynamic_query(cursor, queries["update_location"], {"loc": fork_loc, "wh": wh_id})
-        steps.append("Device assignment cleared. Fork location reset.")
+        steps.append("Fork location reset.")
 
         conn.commit(); cursor.close()
-        log_device_reset("INFO", f"Manual reset completed for device {device_id}.", device_id=device_id, run_id=run_id)
+        log_device_reset("INFO", f"Manual reset completed for {input_type} {device_id}.", device_id=device_id, run_id=run_id)
         notify.send_run_report(
             db_config_id, "Device Reset Agent",
-            [{"status": "SUCCESS", "message": f"Device {device_id} reset"}],
+            [{"status": "SUCCESS", "message": f"Device/Employee {device_id} reset"}],
             executed_by=current_user.username,
         )
         log_audit_action(current_user.username, "EXECUTE_MANUAL_RESET", device_id, {"db_config_id": db_config_id, "status": "SUCCESS", "steps": steps})
