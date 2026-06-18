@@ -24,27 +24,6 @@
   <!-- Form Panel (Responsive width: full width on mobile, 58% on small tablet, 48% on tablet, 38% on desktop) -->
   <div class="w-full sm:w-[58%] md:w-[48%] lg:w-[38%] min-h-screen overflow-y-auto flex flex-col justify-between p-8 sm:p-12 md:p-16 bg-white/92 sm:bg-white/95 lg:bg-white dark:bg-[#030712]/92 sm:dark:bg-[#030712]/95 dark:lg:bg-[#030712] border-t sm:border-t-0 sm:border-l border-slate-200/60 dark:border-slate-800/40 z-20 shadow-[0_0_60px_rgba(0,0,0,0.08)] dark:shadow-[0_0_60px_rgba(0,0,0,0.5)] relative backdrop-blur-xl lg:backdrop-blur-sm transition-all duration-300">
 
-    <!-- Theme Toggle Button for Login Page -->
-    <div class="absolute top-6 right-6 z-30">
-      <button type="button" @click="toggleTheme()" class="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0c111d] text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors shadow-sm focus:outline-none" title="Toggle Theme">
-        <!-- Sun Icon (shown when dark) -->
-        <svg x-show="dark" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="5"></circle>
-          <line x1="12" y1="1" x2="12" y2="3"></line>
-          <line x1="12" y1="21" x2="12" y2="23"></line>
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-          <line x1="1" y1="12" x2="3" y2="12"></line>
-          <line x1="21" y1="12" x2="23" y2="12"></line>
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-        </svg>
-        <!-- Moon Icon (shown when light) -->
-        <svg x-show="!dark" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" x-cloak>
-          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
-        </svg>
-      </button>
-    </div>
 
     <!-- Top Part: Logo and Brand -->
     <div class="flex items-center gap-3.5 select-none mb-10 lg:mb-16">
@@ -66,7 +45,6 @@
     <!-- Center Part: Form and Headings -->
     <div class="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
       <div class="mb-8 select-none">
-        <p class="text-xs font-bold text-blue-500/70 uppercase tracking-[0.2em] mb-3">Secure Access Portal</p>
         <h1 class="text-4xl font-light tracking-tight text-slate-900 dark:text-white mb-3">Welcome back</h1>
         <p class="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">Sign in to your Tychons Wi-Agents dashboard to manage warehouse automation workflows.</p>
       </div>
@@ -106,23 +84,6 @@
       </form>
     </div>
 
-    <!-- Bottom Part: Minimalistic Footer -->
-    <div class="mt-10 lg:mt-16 border-t border-slate-200/60 dark:border-slate-800/40 pt-6 px-1 select-none">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2">
-          <div class="w-1.5 h-1.5 rounded-full bg-emerald-400" style="animation:dotBlink 2s ease-in-out infinite"></div>
-          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold tracking-wider">ALL SYSTEMS OPERATIONAL</span>
-        </div>
-        <span class="text-[10px] text-slate-400 dark:text-slate-600 font-medium tracking-wider">v2.4.0</span>
-      </div>
-      <div class="flex items-center gap-4 text-[9px] text-slate-400 dark:text-slate-600 font-medium tracking-wider">
-        <span>TYCHONS WI-AGENTS</span>
-        <span>•</span>
-        <span>256-BIT ENCRYPTED</span>
-        <span>•</span>
-        <span>ENTERPRISE</span>
-      </div>
-    </div>
 
   </div>
 </div>

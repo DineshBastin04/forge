@@ -83,7 +83,7 @@
 
         <div x-show="dr.tab==='manual'">
           <div class="card max-w-lg">
-            <h3 class="font-semibold text-slate-800 mb-4">Manual Device Reset</h3>
+            <h3 class="font-semibold text-slate-800 mb-4">Manual Device / Employee Reset</h3>
             <div class="space-y-4">
               <div>
                 <label class="label">Database</label>
@@ -93,8 +93,21 @@
                 </select>
               </div>
               <div>
-                <label class="label">Device ID</label>
-                <input x-model="dr.manualDeviceId" class="input" placeholder="e.g. RF001" @keydown.enter="drManualReset()">
+                <label class="label">Input Type</label>
+                <div class="flex gap-4 mt-1">
+                  <label class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                    <input type="radio" x-model="dr.manualInputType" value="device">
+                    <span>Device ID</span>
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                    <input type="radio" x-model="dr.manualInputType" value="employee">
+                    <span>Employee ID</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label class="label" x-text="dr.manualInputType === 'device' ? 'Device ID' : 'Employee ID'"></label>
+                <input x-model="dr.manualDeviceId" class="input" :placeholder="dr.manualInputType === 'device' ? 'e.g. RF001' : 'e.g. EMP123'" @keydown.enter="drManualReset()">
               </div>
               <button class="btn-primary w-full sm:w-auto justify-center" @click="drManualReset()" :disabled="dr.manualLoading||!dr.manualDbId||!dr.manualDeviceId.trim()">
                 <svg x-show="dr.manualLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>

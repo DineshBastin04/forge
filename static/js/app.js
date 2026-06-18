@@ -6,7 +6,7 @@ function app() {
     dark: true,
     settings: { default_theme: 'dark', saving: false },
     dr: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
-          manualDbId:'', manualDeviceId:'', manualLoading:false, manualResult:null,
+          manualDbId:'', manualDeviceId:'', manualInputType:'device', manualLoading:false, manualResult:null,
           logs:[], logsLoading:false, logSearch:'', logLevel:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[] },
     up: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
@@ -44,13 +44,8 @@ function app() {
         }
       } catch (e) {}
 
-      // 2. Resolve theme (localStorage user preference overrides default)
-      const cachedTheme = localStorage.getItem('user-theme');
-      if (cachedTheme) {
-        this.dark = cachedTheme === 'dark';
-      } else {
-        this.dark = this.settings.default_theme === 'dark';
-      }
+      // 2. Resolve theme (strictly controlled by default_theme setting)
+      this.dark = this.settings.default_theme === 'dark';
       this.applyTheme();
 
       // 3. User authentication & load dashboard
@@ -91,6 +86,9 @@ function app() {
         });
         if (d) {
           this.toast('System settings saved', 'success');
+          // Apply the new theme immediately system-wide
+          this.dark = this.settings.default_theme === 'dark';
+          this.applyTheme();
         }
       } catch (e) {
         this.toast(e.message, 'error');
@@ -184,7 +182,7 @@ function app() {
     async drLoadScheduler(){this.dr.schedulerLoading=true;try{this.dr.schedulerInfo=await this.api('/api/v0/device_reset_agent/scheduler_status');}catch(e){this.dr.schedulerInfo=null;}finally{this.dr.schedulerLoading=false;}},
     async drToggle(){try{await this.api('/api/v0/device_reset_agent/scheduler_toggle',{method:'POST'});await this.drLoadScheduler();this.toast('Scheduler updated','success');}catch(e){this.toast(e.message,'error');}},
     async drSetInterval(){const h=parseFloat(this.dr.intervalInput);if(!h||h<.25||h>168){this.toast('Interval must be 0.25–168 hours','error');return;}try{await this.api('/api/v0/device_reset_agent/scheduler_interval',{method:'POST',body:JSON.stringify({hours:h})});this.dr.intervalInput='';await this.drLoadScheduler();this.toast(`Interval set to ${h}h`,'success');}catch(e){this.toast(e.message,'error');}},
-    async drManualReset(){if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast('Select DB and enter device ID','error');return;}if(!await this.confirmDialog(`Reset device "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim()})});this.dr.manualResult={ok:true,steps:d.steps||[]};this.toast('Device reset successful','success');}catch(e){this.dr.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
+    async drManualReset(){const typeLabel=this.dr.manualInputType==='device'?'Device':'Employee';if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast(`Select DB and enter ${typeLabel} ID`,'error');return;}if(!await this.confirmDialog(`Reset ${this.dr.manualInputType==='device'?'device':'employee'} "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim(),input_type:this.dr.manualInputType})});this.dr.manualResult={ok:true,steps:d.steps||[]};this.toast(`${typeLabel} reset successful`,'success');}catch(e){this.dr.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
     async drLoadLogs(){this.dr.logsLoading=true;try{const d=await this.api('/api/v0/device_reset_logs');this.dr.logs=d?d.logs:[];}catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}},
     drDownloadLogs(fmt){window.location.href=`/api/v0/device_reset_logs/download?format=${fmt}`;},
     async drAutoScan(){

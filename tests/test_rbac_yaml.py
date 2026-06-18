@@ -28,8 +28,12 @@ def app():
     def load_user(user_id):
         return app.config.get("test_users", {}).get(user_id)
 
+    from agents.device_reset import bp as dr_bp
+    from agents.unpick import bp as unpick_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(dr_bp)
+    app.register_blueprint(unpick_bp)
     return app
 
 @pytest.fixture
@@ -193,3 +197,120 @@ def test_admin_blocked_from_editing_admin_roles(mock_get_conn, app, client):
     })
     assert res.status_code == 403
     assert "Only superadmin can manage admin/superadmin accounts" in res.get_json()["error"]
+
+@patch("users._get_conn")
+def test_admin_can_edit_user_agent_perms(mock_get_conn, app, client):
+    # Logged in as standard admin
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.get_id.return_value = "2"
+    user.is_superadmin.return_value = False
+    user.is_admin.return_value = True
+    user.force_change_password = False
+    
+    app.config["test_users"] = {"2": user}
+    with client.session_transaction() as sess:
+        sess["_user_id"] = "2"
+        
+    # Target is a standard user (role='user')
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+    
+    # Mock row lookup for user 3 (the target user we are editing)
+    # SELECT username, role, agent_perms, is_active, display_name FROM users WHERE id = ?
+    conn.execute.return_value.fetchone.side_effect = [
+        (3,),                                         # user exists check
+        ("target_user", "user", "[]", 1, "Target"),  # row_before in update_user
+        ("target_user", "user", "[\"device_reset\"]", 1, "Target")  # row_after in update_user
+    ]
+    
+    # Try to edit target user's agent_perms
+    res = client.patch("/api/v0/admin/users/3", json={
+        "agent_perms": ["device_reset"]
+    })
+    assert res.status_code == 200
+    assert res.get_json()["type"] == "success"
+
+@patch("users._get_conn")
+@patch("users.bcrypt.hashpw")
+def test_admin_can_create_user_with_agent_perms(mock_hashpw, mock_get_conn, app, client):
+    # Logged in as standard admin
+    user = MagicMock()
+    user.is_authenticated = True
+    user.is_active = True
+    user.get_id.return_value = "2"
+    user.is_superadmin.return_value = False
+    user.is_admin.return_value = True
+    user.force_change_password = False
+    
+    app.config["test_users"] = {"2": user}
+    with client.session_transaction() as sess:
+        sess["_user_id"] = "2"
+        
+    mock_hashpw.return_value = b"hashed_pw"
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+    
+    # Mock row lookup for username uniqueness (empty = unique)
+    # Mock execute count check
+    conn.execute.return_value.fetchone.return_value = None
+    
+    # Try to create user
+    res = client.post("/api/v0/admin/users", json={
+        "username": "new_user",
+        "password": "password123",
+        "role": "user",
+        "agent_perms": ["device_reset"]
+    })
+    assert res.status_code == 201
+    assert res.get_json()["type"] == "success"
+
+@patch("agents.device_reset.get_config")
+@patch("agents.device_reset.get_engine")
+@patch("agents.device_reset.load_agent_queries")
+@patch("agents.device_reset.execute_dynamic_query")
+def test_user_with_agent_perm_can_execute_reset(mock_execute_query, mock_load_queries, mock_get_engine, mock_get_config, app, client):
+    # Logged in as standard user
+    user = User([6, "user_6", "hash", "user", '["device_reset"]', 1])
+    app.config["test_users"] = {"6": user}
+    with client.session_transaction() as sess:
+        sess["_user_id"] = "6"
+        
+    mock_get_config.return_value = {"db_type": "mssql", "db": {}}
+    
+    # Mock engine / conn
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.cursor.return_value = cursor
+    mock_get_engine.return_value.raw_connection.return_value = conn
+    
+    # Mock load queries
+    mock_load_queries.return_value = {
+        "find_employee": "SELECT id FROM t_employee",
+        "find_location": "SELECT wh_id, location_id FROM t_location",
+        "check_stored_item": "SELECT 1",
+        "check_hu_master": "SELECT 1",
+        "find_staging": "SELECT TOP 1 location_id",
+        "update_employee": "UPDATE t_employee",
+        "update_location": "UPDATE t_location"
+    }
+    
+    # Mock row lookups
+    mock_execute_query.return_value.fetchone.side_effect = [
+        ("EMP123",),  # find_employee
+        ("WH1", "LOC001"),  # find_location
+        None,  # check_stored_item
+        None,  # check_hu_master
+    ]
+    
+    res = client.post("/api/v0/device_reset_agent/manual_reset", json={
+        "db_config_id": "test_db",
+        "device_id": "DEV001",
+        "input_type": "device"
+    })
+    
+    assert res.status_code == 200
+
+
+

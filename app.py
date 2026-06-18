@@ -6,7 +6,7 @@ Run:
     cp .env.example .env   # fill in credentials
     python app.py
     -> http://localhost:5001
-    -> Login: admin / change-me  (change immediately)
+    -> Login: superadmin / change-me  (change immediately)
 """
 
 import os
