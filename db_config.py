@@ -363,3 +363,64 @@ def test_notification():
     if ok:
         return jsonify({"type": "success"})
     return jsonify({"type": "error", "error": "Failed — check webhook URL and try again"}), 500
+
+
+# ─── System Settings (Theme, etc.) ───────────────────────────────────────────
+
+def _settings_path():
+    data_dir = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, "system_settings.json")
+
+
+def load_settings():
+    path = _settings_path()
+    if not os.path.exists(path):
+        return {"default_theme": "dark"}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"default_theme": "dark"}
+
+
+def save_settings(settings):
+    path = _settings_path()
+    with open(path, "w") as f:
+        json.dump(settings, f)
+
+
+@bp.route("/api/v0/settings", methods=["GET"])
+def get_settings():
+    return jsonify(load_settings())
+
+
+@bp.route("/api/v0/settings", methods=["PATCH"])
+def update_settings():
+    from auth import superadmin_required_check
+    err = superadmin_required_check()
+    if err:
+        return err
+
+    data = request.get_json() or {}
+    settings = load_settings()
+
+    if "default_theme" in data:
+        theme = data["default_theme"]
+        if theme not in ("dark", "light", "system"):
+            return jsonify({"type": "error", "error": "Invalid theme value"}), 400
+        settings["default_theme"] = theme
+
+    save_settings(settings)
+
+    from auth import log_audit_action
+    from flask_login import current_user
+    log_audit_action(
+        username=current_user.username,
+        action="update_system_settings",
+        target="system_settings",
+        details=data
+    )
+
+    return jsonify(settings)
+

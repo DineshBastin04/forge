@@ -1,0 +1,326 @@
+<!-- ═══════════════════════ TOASTS ══════════════════════════════════════ -->
+<div class="fixed top-4 right-4 z-50 space-y-2 w-80 pointer-events-none">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="pointer-events-auto flex items-start gap-3 p-4 rounded-xl shadow-lg border text-sm"
+         :class="{'bg-white border-slate-200 text-slate-800':t.type==='info','bg-emerald-50 border-emerald-200 text-emerald-800':t.type==='success','bg-red-50 border-red-200 text-red-800':t.type==='error','bg-amber-50 border-amber-200 text-amber-800':t.type==='warning'}"
+         x-transition:enter="transition ease-out duration-200 transform" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100"
+         x-transition:leave="transition ease-in duration-150 transform" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0">
+      <!-- Icon -->
+      <span class="flex-shrink-0 mt-0.5">
+        <svg x-show="t.type==='success'" class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+        <svg x-show="t.type==='error'" class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+        <svg x-show="t.type==='warning'" class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <svg x-show="t.type==='info'" class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </span>
+      <span class="flex-1" x-text="t.msg"></span>
+      <button @click="toasts=toasts.filter(x=>x.id!==t.id)" class="flex-shrink-0 opacity-40 hover:opacity-80 transition-opacity">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </template>
+</div>
+
+<!-- ═══════════════════════ MODAL: User ═════════════════════════════════ -->
+<div x-show="au.modal" class="modal-backdrop" @click.self="au.modal=false" @keydown.escape.window="au.modal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-lg" @click.stop x-trap.inert.noscroll="au.modal">
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg" x-text="au.editId?'Edit User':'Create User'"></h3>
+      <button @click="au.modal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="label">Display Name</label><input x-model="au.form.display_name" class="input" placeholder="Full name"></div>
+        <div><label class="label">Username</label><input x-model="au.form.username" class="input" placeholder="login" :disabled="!!au.editId"></div>
+      </div>
+      <div><label class="label" x-text="au.editId?'New Password (blank = keep)':'Password'"></label><input x-model="au.form.password" type="password" class="input" :placeholder="au.editId?'Leave blank to keep current':'Set password'"></div>
+      <div>
+        <select x-model="au.form.role" class="select">
+          <option value="user">User</option>
+          <option value="admin" x-show="isSuperadmin()">Admin</option>
+          <option value="superadmin" x-show="isSuperadmin()">Superadmin</option>
+        </select>
+      </div>
+      <div x-show="au.form.role==='user'">
+        <label class="label">Agent Permissions</label>
+        <div class="flex flex-wrap gap-4 mt-2">
+          <template x-for="agent in registeredAgents" :key="agent.id">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" :checked="au.form.agent_perms.includes(agent.id)" @change="auTogglePerm(agent.id)" class="rounded w-4 h-4 border-slate-300 text-indigo-600">
+              <span class="text-sm text-slate-700 capitalize" x-text="agent.name"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+      <div x-show="!!au.editId" class="flex items-center gap-2 pt-1">
+        <input type="checkbox" x-model="au.form.is_active" id="u-active" class="rounded w-4 h-4">
+        <label for="u-active" class="text-sm text-slate-700 cursor-pointer">Account active</label>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button class="btn-secondary w-full sm:w-auto justify-center" @click="au.modal=false">Cancel</button>
+      <button class="btn-primary w-full sm:w-auto justify-center" @click="auSave()" :disabled="au.saving">
+        <svg x-show="au.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span x-text="au.saving?'Saving…':(au.editId?'Save Changes':'Create User')"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: DB Config ════════════════════════════ -->
+<div x-show="dbc.modal" class="modal-backdrop" @click.self="dbc.modal=false" @keydown.escape.window="dbc.modal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-2xl" @click.stop x-trap.inert.noscroll="dbc.modal">
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg" x-text="dbc.editId?'Edit DB Configuration':'New DB Configuration'"></h3>
+      <button @click="dbc.modal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="flex gap-1 px-6 border-b border-slate-200">
+      <button class="tab-btn" :class="dbc.modalTab==='connection'&&'active'" @click="dbc.modalTab='connection'">Connection</button>
+      <button class="tab-btn" :class="dbc.modalTab==='notifications'&&'active'" @click="dbc.modalTab='notifications'">Notifications</button>
+    </div>
+    <div class="p-6">
+      <div x-show="dbc.modalTab==='connection'" class="space-y-4">
+        <div><label class="label">Configuration Name <span class="text-slate-400 font-normal text-xs">(used as unique identifier)</span></label><input x-model="dbc.form.name" class="input" placeholder="e.g. Warehouse East" :disabled="!!dbc.editId"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="label">Database Type</label>
+            <select x-model="dbc.form.db_type" class="select">
+              <option value="mssql">Microsoft SQL Server</option>
+              <option value="oracle">Oracle Database</option>
+            </select>
+          </div>
+          <div><label class="label">Port <span class="text-slate-400 font-normal text-xs" x-text="'(default '+dbcDefaultPort()+')'"></span></label><input x-model="dbc.form.db.port" class="input" :placeholder="dbcDefaultPort()"></div>
+        </div>
+        <div><label class="label">Server / Host</label><input x-model="dbc.form.db.server" class="input" placeholder="hostname or IP address"></div>
+        <div><label class="label" x-text="dbc.form.db_type==='oracle'?'Service Name':'Database Name'"></label><input x-model="dbc.form.db.database" class="input" :placeholder="dbc.form.db_type==='oracle'?'ORCL':'database name'"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div><label class="label">Username</label><input x-model="dbc.form.db.username" class="input" placeholder="db user" autocomplete="off"></div>
+          <div><label class="label" x-text="dbc.editId?'Password (blank = keep)':'Password'"></label><input x-model="dbc.form.db.password" type="password" class="input" :placeholder="dbc.editId?'Leave blank to keep':'password'" autocomplete="new-password"></div>
+        </div>
+
+        <div class="flex justify-end pt-2">
+          <button type="button" class="btn-secondary btn-sm flex items-center gap-1.5" @click="dbcTestFormConn('primary')" :disabled="dbc.formTestLoading">
+            <svg x-show="dbc.formTestLoading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <span>Test Connection</span>
+          </button>
+        </div>
+        <div x-show="dbc.formTestResult" class="mt-2 p-3 rounded-lg text-xs" :class="dbc.formTestResult && dbc.formTestResult.ok ? 'bg-emerald-50 border border-emerald-100 text-emerald-800' : 'bg-red-50 border border-red-100 text-red-800'">
+          <p x-text="dbc.formTestResult && dbc.formTestResult.msg"></p>
+        </div>
+
+        <div class="pt-4 border-t border-slate-100">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" x-model="dbc.form.use_log_db" class="rounded w-4 h-4 border-slate-300 text-indigo-600">
+            <span class="text-sm font-semibold text-slate-700">Use separate database connection for Log / Telemetry (device reset agent)</span>
+          </label>
+        </div>
+
+        <div x-show="dbc.form.use_log_db" class="space-y-4 pt-4 border-t border-slate-100" x-transition>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label">Server / Host</label>
+              <input x-model="dbc.form.log_db.server" class="input" placeholder="hostname or IP address">
+            </div>
+            <div>
+              <label class="label">Port <span class="text-slate-400 font-normal text-xs" x-text="'(default '+dbcDefaultPort()+')'"></span></label>
+              <input x-model="dbc.form.log_db.port" class="input" :placeholder="dbcDefaultPort()">
+            </div>
+          </div>
+          <div>
+            <label class="label" x-text="dbc.form.db_type==='oracle'?'Service Name':'Database Name'"></label>
+            <input x-model="dbc.form.log_db.database" class="input" :placeholder="dbc.form.db_type==='oracle'?'ORCL':'database name'">
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><label class="label">Username</label><input x-model="dbc.form.log_db.username" class="input" placeholder="db user" autocomplete="off"></div>
+            <div><label class="label" x-text="dbc.editId?'Password (blank = keep)':'Password'"></label><input x-model="dbc.form.log_db.password" type="password" class="input" :placeholder="dbc.editId?'Leave blank to keep':'password'" autocomplete="new-password"></div>
+          </div>
+
+          <div class="flex justify-end pt-2">
+            <button type="button" class="btn-secondary btn-sm flex items-center gap-1.5" @click="dbcTestFormConn('log')" :disabled="dbc.logFormTestLoading">
+              <svg x-show="dbc.logFormTestLoading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span>Test Telemetry Connection</span>
+            </button>
+          </div>
+          <div x-show="dbc.logFormTestResult" class="mt-2 p-3 rounded-lg text-xs" :class="dbc.logFormTestResult && dbc.logFormTestResult.ok ? 'bg-emerald-50 border border-emerald-100 text-emerald-800' : 'bg-red-50 border border-red-100 text-red-800'">
+            <p x-text="dbc.logFormTestResult && dbc.logFormTestResult.msg"></p>
+          </div>
+        </div>
+      </div>
+      <div x-show="dbc.modalTab==='notifications'" class="space-y-5">
+        <div class="p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-700">Configure webhooks to receive run reports and alerts in Teams or Slack.</div>
+        <div>
+          <label class="label">Microsoft Teams Webhook URL</label>
+          <input x-model="dbc.form.notify.teams_webhook" class="input" placeholder="https://outlook.office.com/webhook/…">
+          <template x-if="dbc.editId&&dbc.form.notify.teams_webhook"><button class="btn-secondary btn-sm mt-2" @click="dbcTestNotify(dbc.editId,'teams')">Send Test Message</button></template>
+        </div>
+        <div>
+          <label class="label">Slack Webhook URL</label>
+          <input x-model="dbc.form.notify.slack_webhook" class="input" placeholder="https://hooks.slack.com/services/…">
+          <template x-if="dbc.editId&&dbc.form.notify.slack_webhook"><button class="btn-secondary btn-sm mt-2" @click="dbcTestNotify(dbc.editId,'slack')">Send Test Message</button></template>
+        </div>
+        <div class="space-y-3 pt-3 border-t border-slate-200">
+          <label class="label">Alert Triggers</label>
+          <label class="flex items-start gap-3 cursor-pointer"><input type="checkbox" x-model="dbc.form.notify.report_after_run" class="rounded w-4 h-4 mt-0.5 border-slate-300 text-indigo-600"><div><div class="text-sm font-medium text-slate-700">Send run report after each job</div><div class="text-xs text-slate-500">Summary of records processed</div></div></label>
+          <label class="flex items-start gap-3 cursor-pointer"><input type="checkbox" x-model="dbc.form.notify.on_error" class="rounded w-4 h-4 mt-0.5 border-slate-300 text-indigo-600"><div><div class="text-sm font-medium text-slate-700">Alert on errors</div><div class="text-xs text-slate-500">When an agent encounters an error</div></div></label>
+          <label class="flex items-start gap-3 cursor-pointer"><input type="checkbox" x-model="dbc.form.notify.on_warning" class="rounded w-4 h-4 mt-0.5 border-slate-300 text-indigo-600"><div><div class="text-sm font-medium text-slate-700">Alert on warnings</div><div class="text-xs text-slate-500">When an agent produces a warning</div></div></label>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button class="btn-secondary w-full sm:w-auto justify-center" @click="dbc.modal=false">Cancel</button>
+      <button class="btn-primary w-full sm:w-auto justify-center" @click="dbcSave()" :disabled="dbc.saving">
+        <svg x-show="dbc.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span x-text="dbc.saving?'Saving…':(dbc.editId?'Save Changes':'Create Config')"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: Audit Detail ═════════════════════════ -->
+<div x-show="au.auditDetailModal" class="modal-backdrop" @click.self="au.auditDetailModal=false" @keydown.escape.window="au.auditDetailModal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-lg" @click.stop>
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg">Audit Log Details</h3>
+      <button @click="au.auditDetailModal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="label">Event Info</label>
+        <div class="bg-slate-50 rounded-lg p-3 text-xs font-mono space-y-1">
+          <div><strong>Timestamp (UTC):</strong> <span x-text="au.activeAudit && au.activeAudit.timestamp"></span></div>
+          <div><strong>Action:</strong> <span x-text="au.activeAudit && au.activeAudit.action"></span></div>
+          <div><strong>Target ID:</strong> <span x-text="au.activeAudit && au.activeAudit.target"></span></div>
+          <div><strong>Triggered By:</strong> <span x-text="au.activeAudit && au.activeAudit.username"></span></div>
+          <div><strong>IP Address:</strong> <span x-text="au.activeAudit && au.activeAudit.details.ip_address || '—'"></span></div>
+          <div><strong>User Agent:</strong> <span x-text="au.activeAudit && au.activeAudit.details.user_agent || '—'"></span></div>
+        </div>
+      </div>
+      <div>
+        <label class="label">Payload / Changes</label>
+        <pre class="bg-slate-950 text-slate-300 rounded-lg p-3 text-xs font-mono overflow-auto max-h-60" x-text="JSON.stringify(au.activeAudit && cleanAuditDetails(au.activeAudit.details), null, 2)"></pre>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button class="btn-secondary w-full sm:w-auto justify-center" @click="au.auditDetailModal=false">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: Agent Workflow ═══════════════════════ -->
+<div x-show="aw.modal" class="modal-backdrop" @click.self="aw.modal=false" @keydown.escape.window="aw.modal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-2xl" @click.stop>
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg" x-text="aw.editId ? 'Edit Agent Workflow' : 'Add Agent Workflow'"></h3>
+      <button @click="aw.modal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div x-show="aw.error" class="p-3 bg-red-50 border border-red-200 text-red-800 text-sm rounded-lg" x-text="aw.error"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="label">Agent ID</label><input x-model="aw.form.id" class="input" placeholder="e.g. custom_agent" :disabled="!!aw.editId"></div>
+        <div><label class="label">Agent Name</label><input x-model="aw.form.name" class="input" placeholder="e.g. Custom Agent"></div>
+      </div>
+      <div><label class="label">Description</label><input x-model="aw.form.description" class="input" placeholder="Short description of what the agent does"></div>
+      <div>
+        <label class="label">YAML Flow Query Config</label>
+        <textarea x-model="aw.form.flow_yaml" rows="12" class="input font-mono text-xs" style="font-family: monospace;" placeholder="queries:&#10;  find_picked_qty: |&#10;    SELECT picked_quantity FROM t_pick_detail WHERE ..."></textarea>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button class="btn-secondary w-full sm:w-auto justify-center" @click="aw.modal=false">Cancel</button>
+      <button class="btn-primary w-full sm:w-auto justify-center" @click="awSave()" :disabled="aw.saving">
+        <svg x-show="aw.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span x-text="aw.saving?'Saving…':(aw.editId?'Save Flow':'Create Agent')"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: Profile ══════════════════════════════ -->
+<div x-show="profile.modal" class="modal-backdrop" @click.self="if(user&&user.force_change_password) return; profile.modal=false"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-md" @click.stop>
+    <div class="flex items-center justify-between p-6 border-b border-slate-200">
+      <h3 class="font-semibold text-slate-800 text-lg" x-text="user&&user.force_change_password ? 'Change Default Password (Required)' : 'Edit Profile'"></h3>
+      <button x-show="!(user&&user.force_change_password)" @click="profile.modal=false" class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div x-show="!(user&&user.force_change_password)"><label class="label">Display Name</label><input x-model="profile.form.display_name" class="input" placeholder="Your full name"></div>
+      <div class="border-t border-slate-100 pt-4">
+        <p class="text-sm font-semibold text-slate-700 mb-3">Change Password <span class="text-slate-400 font-normal" x-show="!(user&&user.force_change_password)">(optional)</span></p>
+        <div class="space-y-3" x-data="{ showCurrent: false, showNew: false }">
+          <div>
+            <label class="label">Current Password</label>
+            <div class="relative flex items-center">
+              <input x-model="profile.form.current_password" :type="showCurrent ? 'text' : 'password'" class="input pr-10" placeholder="Current password">
+              <button type="button" @click="showCurrent = !showCurrent" class="absolute right-3 text-slate-400 hover:text-slate-600 focus:outline-none">
+                <!-- Eye Icon -->
+                <svg x-show="!showCurrent" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <!-- Eye Slash Icon -->
+                <svg x-show="showCurrent" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" x-cloak><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="label">New Password</label>
+            <div class="relative flex items-center">
+              <input x-model="profile.form.new_password" :type="showNew ? 'text' : 'password'" class="input pr-10" placeholder="New password">
+              <button type="button" @click="showNew = !showNew" class="absolute right-3 text-slate-400 hover:text-slate-600 focus:outline-none">
+                <!-- Eye Icon -->
+                <svg x-show="!showNew" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <!-- Eye Slash Icon -->
+                <svg x-show="showNew" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" x-cloak><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
+              </button>
+            </div>
+            <div x-show="profile.form.new_password.length>0" class="mt-2">
+              <div class="flex gap-1 mb-1">
+                <template x-for="i in 4">
+                  <div class="h-1.5 flex-1 rounded-full transition-colors duration-200"
+                       :class="i<=pwStrength(profile.form.new_password).score ? pwStrength(profile.form.new_password).barColor : 'bg-slate-200'"></div>
+                </template>
+              </div>
+              <span class="text-xs font-medium" :class="pwStrength(profile.form.new_password).textColor" x-text="pwStrength(profile.form.new_password).label"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 p-6 border-t border-slate-200">
+      <button x-show="!(user&&user.force_change_password)" class="btn-secondary w-full sm:w-auto justify-center" @click="profile.modal=false">Cancel</button>
+      <button class="btn-primary w-full sm:w-auto justify-center" @click="saveProfile()" :disabled="profile.saving">
+        <svg x-show="profile.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <span x-text="profile.saving?'Saving…':'Save Changes'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MODAL: Confirm ══════════════════════════════ -->
+<div x-show="confirm.show" class="modal-backdrop" @keydown.escape.window="confirmCancel()"
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+  <div class="modal max-w-sm" @click.stop x-trap.inert.noscroll="confirm.show">
+    <div class="p-6">
+      <div class="flex items-start gap-4">
+        <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-800 text-base mb-1">Confirm Action</h3>
+          <p class="text-sm text-slate-600" x-text="confirm.msg"></p>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-row justify-end gap-3 px-6 pb-6">
+      <button class="btn-secondary" @click="confirmCancel()">Cancel</button>
+      <button class="btn-danger" @click="confirmOk()">Confirm</button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,45 @@
+      <!-- ══ USERS ══ -->
+      <div x-show="view==='users'">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <h3 class="text-lg font-semibold text-slate-800">User Management</h3>
+          <div class="flex items-center gap-3">
+            <input x-model="au.userSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search users…">
+            <button class="btn-primary" @click="auOpenCreate()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Add User
+            </button>
+          </div>
+        </div>
+        <div x-show="au.loading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!au.loading" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">Name</th><th class="th">Username</th><th class="th">Role</th><th class="th">Agent Permissions</th><th class="th">Status</th><th class="th">Last Login</th><th class="th"></th></tr></thead>
+            <tbody>
+              <template x-for="u in filteredUsers()" :key="u.id">
+                <tr>
+                  <td class="td"><div class="flex items-center gap-2"><div class="w-7 h-7 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold flex-shrink-0" x-text="userInitials(u)"></div><span class="font-medium" x-text="u.display_name||u.username"></span></div></td>
+                  <td class="td text-slate-500 text-sm" x-text="u.username"></td>
+                  <td class="td"><span class="badge" :class="roleBadge(u.role)" x-text="u.role"></span></td>
+                  <td class="td">
+                    <div class="flex flex-wrap gap-1">
+                      <template x-if="['admin','superadmin'].includes(u.role)"><span class="badge bg-indigo-100 text-indigo-700">all agents</span></template>
+                      <template x-if="u.role==='user'">
+                        <template x-for="p in u.agent_perms" :key="p"><span class="badge bg-slate-100 text-slate-600" x-text="p.replace('_',' ')"></span></template>
+                        <span x-show="u.agent_perms.length===0" class="text-slate-400 text-xs">none</span>
+                      </template>
+                    </div>
+                  </td>
+                  <td class="td"><span class="badge" :class="u.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'" x-text="u.is_active?'Active':'Inactive'"></span></td>
+                  <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(u.last_login)"></td>
+                  <td class="td"><div class="flex items-center gap-2 justify-end">
+                    <button class="btn-secondary btn-sm" x-show="isSuperadmin() || !['admin','superadmin'].includes(u.role)" @click="auOpenEdit(u)">Edit</button>
+                    <button x-show="(u.is_active&&u.id!==(user&&user.id)) && (isSuperadmin() || !['admin','superadmin'].includes(u.role))" class="btn-danger btn-sm" @click="auDeactivate(u.id)">Deactivate</button>
+                    <button x-show="(!u.is_active) && (isSuperadmin() || !['admin','superadmin'].includes(u.role))" class="btn-primary btn-sm" style="background:#059669;color:#fff;" @click="auActivate(u.id)">Activate</button>
+                  </div></td>
+                </tr>
+              </template>
+              <tr x-show="filteredUsers().length===0"><td class="td text-slate-500 text-sm" colspan="7" x-text="au.userSearch?'No users match your search.':'No users found.'"></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>

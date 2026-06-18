@@ -46,24 +46,116 @@ class MSSQLConnectionWrapper:
         self.conn.close()
 
 
+_SQLSERVER_DRIVER_PREFERENCE = [
+    "ODBC Driver 18 for SQL Server",
+    "ODBC Driver 17 for SQL Server",
+    "ODBC Driver 13 for SQL Server",
+    "SQL Server Native Client 11.0",
+    "SQL Server",
+]
+
+
+def _resolve_driver(requested: str) -> str:
+    """Return `requested` if installed, otherwise fall back to the best available SQL Server driver."""
+    installed = set(pyodbc.drivers())
+    if requested in installed:
+        return requested
+    for candidate in _SQLSERVER_DRIVER_PREFERENCE:
+        if candidate in installed:
+            logger.warning(
+                "ODBC driver '%s' not found — using '%s' instead. "
+                "Set METADATA_DB_DRIVER in .env to suppress this warning.",
+                requested, candidate,
+            )
+            return candidate
+    raise RuntimeError(
+        f"No SQL Server ODBC driver found on this machine. "
+        f"Installed drivers: {sorted(installed)}. "
+        f"Install 'ODBC Driver 17 for SQL Server' or newer."
+    )
+
+
+def _build_conn_str_meta(server, database, user, password, driver, trusted=False):
+    trust = ";TrustServerCertificate=yes" if any(v in driver for v in ("ODBC Driver 17", "ODBC Driver 18")) else ""
+    if not trusted and user and password:
+        return f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={user};PWD={password}{trust}"
+    return f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;{trust}"
+
+
+def _try_connect(conn_str: str, fallback_conn_str: str | None = None):
+    """Attempt pyodbc.connect; if SQL auth fails (28000) and a fallback is given, try that."""
+    try:
+        return pyodbc.connect(conn_str, timeout=10)
+    except pyodbc.Error as e:
+        code = e.args[0] if e.args else ""
+        if code == "28000" and fallback_conn_str:
+            logger.warning(
+                "SQL auth failed (%s) — retrying with Windows Authentication.",
+                e.args[1] if len(e.args) > 1 else e,
+            )
+            return pyodbc.connect(fallback_conn_str, timeout=10)
+        raise
+
+
+def _ensure_db(server, database, user, password, driver):
+    """Connect to master and CREATE the target database if it does not exist.
+
+    Returns True if created/verified, False if master was inaccessible — caller
+    falls back to a direct connection attempt.
+    """
+    master_str  = _build_conn_str_meta(server, "master", user, password, driver)
+    trusted_str = _build_conn_str_meta(server, "master", user, password, driver, trusted=True)
+    try:
+        conn = _try_connect(master_str, trusted_str)
+    except pyodbc.Error as e:
+        code = e.args[0] if e.args else ""
+        if code in ("28000", "IM002"):
+            logger.warning(
+                "Cannot connect to 'master' (%s). "
+                "Skipping auto-create — the database must already exist.",
+                e.args[1] if len(e.args) > 1 else e,
+            )
+            return False
+        raise
+    conn.autocommit = True
+    safe_db = database.replace("'", "''").replace("]", "]]")
+    conn.cursor().execute(
+        f"IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'{safe_db}')"
+        f" CREATE DATABASE [{safe_db}]"
+    )
+    conn.close()
+    logger.info("Database '%s' is ready.", database)
+    return True
+
+
 def _get_conn():
     conn_str = os.getenv("METADATA_DB_CONN_STR")
     if not conn_str:
-        server = os.getenv("METADATA_DB_SERVER", "localhost")
-        database = os.getenv("METADATA_DB_DATABASE", "tychons_forge")
-        user = os.getenv("METADATA_DB_USER")
+        server   = os.getenv("METADATA_DB_SERVER",   "localhost")
+        database = os.getenv("METADATA_DB_DATABASE", "tychons_wi_agents")
+        user     = os.getenv("METADATA_DB_USER")
         password = os.getenv("METADATA_DB_PASSWORD")
-        driver = os.getenv("METADATA_DB_DRIVER", "SQL Server")
-        
-        if user and password:
-            conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={user};PWD={password}"
-        else:
-            conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;"
-            
-        if "ODBC Driver 18" in driver:
-            conn_str += ";TrustServerCertificate=yes"
-            
-    conn = pyodbc.connect(conn_str, timeout=10)
+        driver   = _resolve_driver(os.getenv("METADATA_DB_DRIVER", "SQL Server"))
+
+        _ensure_db(server, database, user, password, driver)
+        conn_str         = _build_conn_str_meta(server, database, user, password, driver)
+        trusted_conn_str = _build_conn_str_meta(server, database, user, password, driver, trusted=True)
+    else:
+        trusted_conn_str = None
+
+    try:
+        conn = _try_connect(conn_str, trusted_conn_str)
+    except pyodbc.Error as e:
+        code = e.args[0] if e.args else ""
+        if code == "42000" and "4060" in str(e):
+            db = os.getenv("METADATA_DB_DATABASE", "tychons_wi_agents")
+            raise RuntimeError(
+                f"Database '{db}' does not exist and could not be auto-created "
+                f"(the login lacks access to 'master'). "
+                f"Create it manually in SQL Server Management Studio, "
+                f"or use a login with the 'dbcreator' server role."
+            ) from e
+        raise
     return MSSQLConnectionWrapper(conn)
 
 

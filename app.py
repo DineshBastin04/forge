@@ -1,5 +1,5 @@
 """
-Tychons Forge — Flask application entry point.
+Tychons Wi-Agents — Flask application entry point.
 
 Run:
     pip install -r requirements.txt
@@ -13,14 +13,14 @@ import os
 import atexit
 import logging
 
-from flask import Flask, send_from_directory, jsonify
+from flask import Flask, send_from_directory, render_template, jsonify
 from flask_login import login_required
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
 )
-logger = logging.getLogger("tychons_forge")
+logger = logging.getLogger("tychons_wi_agents")
 
 
 def create_app() -> Flask:
@@ -112,15 +112,15 @@ def create_app() -> Flask:
     # ── SPA shell ─────────────────────────────────────────────────────────────
     @app.route("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        return render_template("index.html")
 
     @app.route("/<path:path>")
     def catch_all(path):
-        # Serve static files; fall back to SPA for client-side routes
+        # Serve static files; fall back to SPA shell for client-side routes
         full = os.path.join(app.static_folder, path)
         if os.path.isfile(full):
             return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, "index.html")
+        return render_template("index.html")
 
     # ── Error handlers ────────────────────────────────────────────────────────
     @app.errorhandler(404)
@@ -179,7 +179,7 @@ if __name__ == "__main__":
             )
             
             threads = int(os.getenv("WAITRESS_THREADS", "8"))
-            logger.info("Tychons Forge starting with Waitress — http://0.0.0.0:%d  (threads=%d)", port, threads)
+            logger.info("Tychons Wi-Agents starting with Waitress — http://0.0.0.0:%d  (threads=%d)", port, threads)
             serve(app, host="0.0.0.0", port=port, threads=threads)
         except ImportError:
             logger.info("Waitress not found — using Flask dev server on port %d", port)

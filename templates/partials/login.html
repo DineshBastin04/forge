@@ -1,0 +1,128 @@
+
+
+<!-- ═══════════════════════════ LOGIN ════════════════════════════════════ -->
+<div x-show="!user" class="min-h-screen relative flex justify-end bg-[#f8fafc] dark:bg-[#030712] transition-colors duration-300" style="min-height:100vh">
+
+  <!-- ═ AMBIENT WAREHOUSE BACKDROP ═ -->
+  <div class="wh-bg" aria-hidden="true">
+    <!-- Day Image (Light Theme) -->
+    <img class="absolute inset-0 w-full h-full object-cover z-0 transition-opacity duration-700 ease-in-out pointer-events-none" 
+         :class="dark ? 'opacity-0' : 'opacity-100'" 
+         src="/static/day2.png" 
+         alt="Warehouse Day">
+    <!-- Night Image (Dark Theme) -->
+    <img class="absolute inset-0 w-full h-full object-cover z-0 transition-opacity duration-700 ease-in-out pointer-events-none" 
+         :class="dark ? 'opacity-100' : 'opacity-0'" 
+         src="/static/night2.png" 
+         alt="Warehouse Night">
+    <!-- Backdrop Blur Overlay to apply dynamic blur over canvas/image in all browsers -->
+    <div class="absolute inset-0 pointer-events-none ripple-overlay z-10"></div>
+    <!-- Vignette / Gradient transition from backdrop on the left to form on the right -->
+    <div class="absolute inset-0 pointer-events-none bg-gradient-to-b sm:bg-gradient-to-r from-transparent via-slate-100/8 sm:via-slate-100/12 to-slate-50/82 dark:from-transparent dark:via-[#030712]/8 dark:sm:via-[#030712]/15 dark:to-[#030712] z-20 transition-all duration-300"></div>
+  </div>
+
+  <!-- Form Panel (Responsive width: full width on mobile, 58% on small tablet, 48% on tablet, 38% on desktop) -->
+  <div class="w-full sm:w-[58%] md:w-[48%] lg:w-[38%] min-h-screen overflow-y-auto flex flex-col justify-between p-8 sm:p-12 md:p-16 bg-white/92 sm:bg-white/95 lg:bg-white dark:bg-[#030712]/92 sm:dark:bg-[#030712]/95 dark:lg:bg-[#030712] border-t sm:border-t-0 sm:border-l border-slate-200/60 dark:border-slate-800/40 z-20 shadow-[0_0_60px_rgba(0,0,0,0.08)] dark:shadow-[0_0_60px_rgba(0,0,0,0.5)] relative backdrop-blur-xl lg:backdrop-blur-sm transition-all duration-300">
+
+    <!-- Theme Toggle Button for Login Page -->
+    <div class="absolute top-6 right-6 z-30">
+      <button type="button" @click="toggleTheme()" class="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0c111d] text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors shadow-sm focus:outline-none" title="Toggle Theme">
+        <!-- Sun Icon (shown when dark) -->
+        <svg x-show="dark" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <!-- Moon Icon (shown when light) -->
+        <svg x-show="!dark" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" x-cloak>
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Top Part: Logo and Brand -->
+    <div class="flex items-center gap-3.5 select-none mb-10 lg:mb-16">
+      <!-- Icon with Blue T and Golden Swoosh -->
+      <div class="w-12 h-12 flex items-center justify-center logo-glow flex-shrink-0">
+        <svg viewBox="0 0 50 50" class="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Blue 'T' -->
+          <text x="14" y="36" font-family="'Inter', 'sans-serif'" font-weight="900" font-size="34" fill="#0062ff">T</text>
+          <!-- Golden swoosh under 'T' -->
+          <path d="M 6 36 C 20 44, 32 38, 44 24 C 32 33, 20 36, 6 36 Z" fill="#e5a913" />
+        </svg>
+      </div>
+      <div>
+        <h2 class="text-sm font-extrabold tracking-wider uppercase bg-gradient-to-r from-slate-800 to-slate-500 dark:from-white dark:to-slate-400 bg-clip-text text-transparent">Tychons Wi-Agents</h2>
+        <p class="text-blue-500/80 text-[9px] tracking-widest uppercase font-bold">Automation Portal</p>
+      </div>
+    </div>
+
+    <!-- Center Part: Form and Headings -->
+    <div class="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
+      <div class="mb-8 select-none">
+        <p class="text-xs font-bold text-blue-500/70 uppercase tracking-[0.2em] mb-3">Secure Access Portal</p>
+        <h1 class="text-4xl font-light tracking-tight text-slate-900 dark:text-white mb-3">Welcome back</h1>
+        <p class="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">Sign in to your Tychons Wi-Agents dashboard to manage warehouse automation workflows.</p>
+      </div>
+
+      <!-- Minimalist Form -->
+      <form @submit.prevent="doLogin()" class="space-y-5">
+        <div>
+          <label class="label">Username</label>
+          <input x-model="loginForm.username" type="text" class="wh-input" placeholder="Enter username" autocomplete="username" required>
+        </div>
+
+        <div x-data="{ showPassword: false }">
+          <label class="label">Password</label>
+          <div class="relative flex items-center">
+            <input x-model="loginForm.password" :type="showPassword ? 'text' : 'password'" class="wh-input pr-10" placeholder="Enter password" autocomplete="current-password" required>
+            <button type="button" @click="showPassword = !showPassword" class="absolute right-3 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 focus:outline-none">
+              <!-- Eye Icon -->
+              <svg x-show="!showPassword" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              <!-- Eye Slash Icon -->
+              <svg x-show="showPassword" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" x-cloak><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
+            </button>
+          </div>
+        </div>
+
+
+
+        <div x-show="loginForm.error" class="px-4 py-3 rounded-lg text-xs bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/20 dark:border-red-900/30 dark:text-red-400"
+             x-text="loginForm.error"></div>
+
+        <button type="submit" :disabled="loginForm.loading" class="btn-login mt-6">
+          <svg x-show="loginForm.loading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span x-text="loginForm.loading ? 'Authorizing Access…' : 'Sign In'"></span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Bottom Part: Minimalistic Footer -->
+    <div class="mt-10 lg:mt-16 border-t border-slate-200/60 dark:border-slate-800/40 pt-6 px-1 select-none">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <div class="w-1.5 h-1.5 rounded-full bg-emerald-400" style="animation:dotBlink 2s ease-in-out infinite"></div>
+          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold tracking-wider">ALL SYSTEMS OPERATIONAL</span>
+        </div>
+        <span class="text-[10px] text-slate-400 dark:text-slate-600 font-medium tracking-wider">v2.4.0</span>
+      </div>
+      <div class="flex items-center gap-4 text-[9px] text-slate-400 dark:text-slate-600 font-medium tracking-wider">
+        <span>TYCHONS WI-AGENTS</span>
+        <span>•</span>
+        <span>256-BIT ENCRYPTED</span>
+        <span>•</span>
+        <span>ENTERPRISE</span>
+      </div>
+    </div>
+
+  </div>
+</div>

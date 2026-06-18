@@ -1,0 +1,26 @@
+      <!-- ══ MY HISTORY ══ -->
+      <div x-show="view==='my-history'">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <button class="btn-secondary btn-sm" @click="myHistoryLoad()">↻ Refresh</button>
+          <span class="text-slate-500 text-sm" x-text="myHistory.length+' entries'"></span>
+          <input x-model="myHistorySearch" type="text" class="input btn-sm w-48 ml-auto font-normal" placeholder="Search my history...">
+        </div>
+        <div x-show="myHistoryLoading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!myHistoryLoading&&filteredMyHistory().length===0" class="card text-slate-500 text-sm">No matching history entries found.</div>
+        <div x-show="!myHistoryLoading&&filteredMyHistory().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">Timestamp</th><th class="th">Action</th><th class="th">Target</th><th class="th">IP Address</th><th class="th">Details</th></tr></thead>
+            <tbody>
+              <template x-for="log in filteredMyHistory()" :key="log.id">
+                <tr>
+                  <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(log.timestamp)"></td>
+                  <td class="td"><span class="badge bg-slate-100 text-slate-700 font-mono text-[10px]" x-text="log.action"></span></td>
+                  <td class="td text-xs font-mono text-slate-600" x-text="log.target"></td>
+                  <td class="td text-xs text-slate-500" x-text="log.details.ip_address||'—'"></td>
+                  <td class="td text-xs text-slate-600 font-mono max-w-xl truncate" :title="JSON.stringify(cleanAuditDetails(log.details))" x-text="JSON.stringify(cleanAuditDetails(log.details))"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table></div>
+        </div>
+      </div>

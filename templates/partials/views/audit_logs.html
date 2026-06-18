@@ -1,0 +1,31 @@
+      <!-- ══ AUDIT LOGS ══ -->
+      <div x-show="view==='audit-logs'">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <button class="btn-secondary btn-sm" @click="auLoadAuditLogs()">↻ Refresh</button>
+          <button class="btn-secondary btn-sm" @click="auDownloadAuditLogs('csv')">↓ CSV</button>
+          <button class="btn-secondary btn-sm" @click="auDownloadAuditLogs('txt')">↓ TXT</button>
+          <span class="text-slate-500 text-sm" x-text="au.auditLogs.length+' entries'"></span>
+          <input x-model="au.auditSearch" type="text" class="input btn-sm w-48 ml-auto font-normal" placeholder="Search logs...">
+        </div>
+        <div x-show="au.auditLoading" class="text-slate-500 text-sm p-4">Loading…</div>
+        <div x-show="!au.auditLoading&&filteredAuditLogs().length===0" class="card text-slate-500 text-sm">No matching audit entries found.</div>
+        <div x-show="!au.auditLoading&&filteredAuditLogs().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto"><table class="min-w-full">
+            <thead><tr><th class="th">Timestamp</th><th class="th">Username</th><th class="th">Action</th><th class="th">Target</th><th class="th">IP Address</th><th class="th"></th></tr></thead>
+            <tbody>
+              <template x-for="log in filteredAuditLogs()" :key="log.id">
+                <tr>
+                  <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(log.timestamp)"></td>
+                  <td class="td font-medium text-slate-800" x-text="log.username"></td>
+                  <td class="td"><span class="badge bg-slate-100 text-slate-700 font-mono text-[10px]" x-text="log.action"></span></td>
+                  <td class="td text-xs font-mono text-slate-600" x-text="log.target"></td>
+                  <td class="td text-xs text-slate-500" x-text="log.details.ip_address||'—'"></td>
+                  <td class="td"><div class="flex justify-end">
+                    <button class="btn-secondary btn-sm" @click="auShowAuditDetail(log)">View Detail</button>
+                  </div></td>
+                </tr>
+              </template>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
