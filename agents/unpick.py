@@ -466,7 +466,7 @@ def execute():
                     except Exception: pass
             results.append({"wh_id": wh_id, "order_number": order_number, "item_number": item_number, **result})
 
-        notify.send_run_report(db_config_id, "Unpick Agent", results, current_user.username)
+        notify.send_run_report(db_config_id, "Unpick Agent", results, current_user.display_name or current_user.username)
         log_unpick("INFO", f"Manual run completed. {len(results)} record(s) processed.", run_id=run_id)
         log_audit_action(current_user.username, "EXECUTE_AUTO_SCAN_UNPICK", db_config_id, {"records_count": len(records), "results": results})
         return jsonify({"type": "success", "results": results, "run_id": run_id})

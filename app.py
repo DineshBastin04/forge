@@ -141,7 +141,7 @@ if __name__ == "__main__":
     except ImportError:
         pass
 
-    # Init SQLite user store
+    # Init MSSQL metadata store (users, audit_logs, scheduler job tables)
     from auth import init_db
     init_db()
 

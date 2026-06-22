@@ -302,7 +302,7 @@ def manual_reset():
         notify.send_run_report(
             db_config_id, "Device Reset Agent",
             [{"status": "SUCCESS", "message": f"Device/Employee {device_id} reset"}],
-            executed_by=current_user.username,
+            executed_by=current_user.display_name or current_user.username,
         )
         log_audit_action(current_user.username, "EXECUTE_MANUAL_RESET", device_id, {"db_config_id": db_config_id, "status": "SUCCESS", "steps": steps})
         return jsonify({"type": "success", "steps": steps})
@@ -382,7 +382,7 @@ def execute():
             res = _reset_device_engine(engine, device_id, run_id)
             results.append({"device_id": device_id, **res})
 
-        notify.send_run_report(db_config_id, "Device Reset Agent", results, current_user.username)
+        notify.send_run_report(db_config_id, "Device Reset Agent", results, current_user.display_name or current_user.username)
         log_device_reset("INFO", f"Manual auto-scan execute completed. {len(results)} device(s) processed.", run_id=run_id)
         log_audit_action(current_user.username, "EXECUTE_AUTO_SCAN_RESET", db_config_id, {"devices_count": len(devices), "results": results})
         return jsonify({"type": "success", "results": results, "run_id": run_id})
