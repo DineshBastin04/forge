@@ -101,44 +101,55 @@ def _reset_device_engine(engine, device_id, run_id):
         with engine.connect() as conn:
             emp_row = execute_dynamic_query(conn, queries["find_employee"], {"dev": device_id}).fetchone()
         if not emp_row:
-            msg = "No employee record found."
+            msg = "No employee record found — device not assigned."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
             return {"status": "WARNING", "message": msg}
         emp_id = emp_row[0]
+        log_device_reset("INFO", f"Employee {emp_id} is assigned to device {device_id}.", device_id=device_id, run_id=run_id)
 
         with engine.connect() as conn:
             loc_row = execute_dynamic_query(conn, queries["find_location"], {"emp": emp_id}).fetchone()
         if not loc_row:
-            msg = "No fork location found."
+            msg = f"No fork location found for employee {emp_id}."
             log_device_reset("WARNING", msg, device_id=device_id, run_id=run_id)
             return {"status": "WARNING", "message": msg}
         wh_id, fork_loc = loc_row[0], loc_row[1]
+        log_device_reset("INFO", f"Fork location {fork_loc} in warehouse {wh_id}.", device_id=device_id, run_id=run_id)
 
         with engine.connect() as conn:
             has_inv = bool(
                 execute_dynamic_query(conn, queries["check_stored_item"], {"l": fork_loc, "w": wh_id}).fetchone()
                 or execute_dynamic_query(conn, queries["check_hu_master"], {"l": fork_loc, "w": wh_id}).fetchone()
             )
+        log_device_reset(
+            "INFO",
+            f"Inventory at {fork_loc}: {'present — relocation required' if has_inv else 'none — no relocation needed'}.",
+            device_id=device_id, run_id=run_id,
+        )
 
         temp_loc = None
         if has_inv:
             with engine.connect() as conn:
                 stage = execute_dynamic_query(conn, queries["find_staging"], {"wh": wh_id}).fetchone()
             if not stage:
-                msg = "No available staging location."
+                msg = "No available staging location found to relocate inventory."
                 log_device_reset("ERROR", msg, device_id=device_id, run_id=run_id)
                 return {"status": "ERROR", "message": msg}
             temp_loc = stage[0]
+            log_device_reset("INFO", f"Staging location {temp_loc} selected for relocation.", device_id=device_id, run_id=run_id)
 
         with engine.begin() as conn:
             if has_inv and temp_loc:
                 for tbl in ("t_stored_item", "t_hu_master", "t_hu_detail"):
                     conn.execute(_text(f"UPDATE {tbl} SET location_id = :new WHERE location_id = :old AND wh_id = :wh"),
                                  {"new": temp_loc, "old": fork_loc, "wh": wh_id})
+                log_device_reset("INFO", f"Inventory relocated from {fork_loc} to staging {temp_loc} (t_stored_item, t_hu_master, t_hu_detail).", device_id=device_id, run_id=run_id)
             execute_dynamic_query(conn, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": device_id})
+            log_device_reset("INFO", f"Device {device_id} cleared from employee {emp_id}.", device_id=device_id, run_id=run_id)
             execute_dynamic_query(conn, queries["update_location"], {"loc": fork_loc, "wh": wh_id})
+            log_device_reset("INFO", f"Fork location {fork_loc} status reset to empty.", device_id=device_id, run_id=run_id)
 
-        msg = f"Device {device_id} reset complete."
+        msg = f"Device {device_id} reset successfully."
         log_device_reset("INFO", msg, device_id=device_id, run_id=run_id)
         return {"status": "SUCCESS", "message": msg}
 
@@ -236,6 +247,7 @@ def manual_reset():
             emp_id = emp_row[0]
             resolved_device_id = device_id
             steps.append("Resolved input as assigned Device ID. Employee record found.")
+            log_device_reset("INFO", f"Employee {emp_id} found for device {device_id}.", device_id=device_id, run_id=run_id)
         else:
             # input_type is "employee"
             emp_by_id_query = queries.get("find_employee_by_id", "SELECT id FROM t_employee WHERE id = :id")
@@ -247,14 +259,17 @@ def manual_reset():
                 return jsonify({"type": "warning", "message": msg})
             emp_id = emp_by_id_row[0]
             steps.append(f"Resolved input as Employee ID. Employee record found for ID: {emp_id}.")
+            log_device_reset("INFO", f"Employee {emp_id} found for Employee ID input '{device_id}'.", device_id=device_id, run_id=run_id)
 
             find_device_query = queries.get("find_device_by_employee", "SELECT device FROM t_employee WHERE id = :id")
             dev_row = execute_dynamic_query(cursor, find_device_query, {"id": emp_id}).fetchone()
             resolved_device_id = dev_row[0] if dev_row else None
             if resolved_device_id:
                 steps.append(f"Found active assigned Device ID: {resolved_device_id}.")
+                log_device_reset("INFO", f"Active device {resolved_device_id} found for employee {emp_id}.", device_id=device_id, run_id=run_id)
             else:
                 steps.append("No active device assignment found for employee.")
+                log_device_reset("INFO", f"No active device assignment for employee {emp_id}.", device_id=device_id, run_id=run_id)
 
         loc_row = execute_dynamic_query(cursor, queries["find_location"], {"emp": emp_id}).fetchone()
         if not loc_row:
@@ -264,12 +279,14 @@ def manual_reset():
             return jsonify({"type": "warning", "message": msg})
         wh_id, fork_loc = loc_row[0], loc_row[1]
         steps.append(f"Fork location: {fork_loc}, WH: {wh_id}.")
+        log_device_reset("INFO", f"Fork location {fork_loc} in warehouse {wh_id}.", device_id=device_id, run_id=run_id)
 
         has_inv = bool(
             execute_dynamic_query(cursor, queries["check_stored_item"], {"l": fork_loc, "w": wh_id}).fetchone()
             or execute_dynamic_query(cursor, queries["check_hu_master"], {"l": fork_loc, "w": wh_id}).fetchone()
         )
         steps.append(f"Inventory at fork: {has_inv}.")
+        log_device_reset("INFO", f"Inventory at fork {fork_loc}: {'present — relocation required' if has_inv else 'none'}.", device_id=device_id, run_id=run_id)
 
         temp_loc = None
         if has_inv:
@@ -281,21 +298,25 @@ def manual_reset():
                 return jsonify({"type": "error", "message": msg})
             temp_loc = stage_row[0]
             steps.append(f"Staging location: {temp_loc}.")
+            log_device_reset("INFO", f"Staging location {temp_loc} selected for inventory relocation.", device_id=device_id, run_id=run_id)
 
         if has_inv and temp_loc:
             for tbl in ("t_stored_item", "t_hu_master", "t_hu_detail"):
                 cursor.execute(f"UPDATE {tbl} SET location_id = ? WHERE location_id = ? AND wh_id = ?",
                                (temp_loc, fork_loc, wh_id))
             steps.append(f"Inventory relocated to {temp_loc}.")
+            log_device_reset("INFO", f"Inventory relocated from {fork_loc} to staging {temp_loc} (t_stored_item, t_hu_master, t_hu_detail).", device_id=device_id, run_id=run_id)
 
         if resolved_device_id:
             execute_dynamic_query(cursor, queries["update_employee"], {"id": emp_id, "wh": wh_id, "dev": resolved_device_id})
             steps.append("Device assignment cleared.")
+            log_device_reset("INFO", f"Device {resolved_device_id} cleared from employee {emp_id}.", device_id=device_id, run_id=run_id)
         else:
             steps.append("No active device assignment to clear.")
 
         execute_dynamic_query(cursor, queries["update_location"], {"loc": fork_loc, "wh": wh_id})
         steps.append("Fork location reset.")
+        log_device_reset("INFO", f"Fork location {fork_loc} status reset to empty.", device_id=device_id, run_id=run_id)
 
         conn.commit(); cursor.close()
         log_device_reset("INFO", f"Manual reset completed for {input_type} {device_id}.", device_id=device_id, run_id=run_id)

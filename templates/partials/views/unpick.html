@@ -9,21 +9,24 @@
         </div>
 
         <div x-show="up.tab==='scheduler'">
-          <div x-show="up.schedulerInfo" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Status</div><span class="badge text-sm py-1" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-yellow-100 text-yellow-700'" x-text="up.schedulerInfo&&(up.schedulerInfo.running&&!up.schedulerInfo.paused?'Running':'Paused')"></span></div>
-            <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Interval</div><div class="text-2xl font-bold text-slate-800" x-text="up.schedulerInfo&&up.schedulerInfo.interval_hours?up.schedulerInfo.interval_hours+'h':'—'"></div></div>
-            <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Next Run</div><div class="text-sm text-slate-700" x-text="up.schedulerInfo&&up.schedulerInfo.next_run?fmtDate(up.schedulerInfo.next_run):'—'"></div></div>
-          </div>
-          <div x-show="!up.schedulerInfo" class="card text-slate-500 text-sm mb-4">Scheduler not available.</div>
-          <template x-if="isAdmin()&&up.schedulerInfo">
-            <div class="flex flex-wrap gap-3 items-end">
-              <button class="btn-secondary" @click="upToggle()" x-text="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'⏸ Pause':'▶ Resume'"></button>
-              <form class="flex gap-2 items-end" @submit.prevent="upSetInterval()">
-                <div><label class="label">Set Interval (hours)</label><input x-model="up.intervalInput" type="number" step="0.25" min="0.25" max="168" class="input w-36" placeholder="e.g. 2"></div>
-                <button type="submit" class="btn-secondary">Apply</button>
-              </form>
+          <div x-show="up.schedulerLoading" class="text-slate-500 text-sm p-2">Loading…</div>
+          <div x-show="!up.schedulerLoading">
+            <div x-show="up.schedulerInfo" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Status</div><span class="badge text-sm py-1" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-yellow-100 text-yellow-700'" x-text="up.schedulerInfo&&(up.schedulerInfo.running&&!up.schedulerInfo.paused?'Running':'Paused')"></span></div>
+              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Interval</div><div class="text-2xl font-bold text-slate-800 dark:text-slate-100" x-text="up.schedulerInfo&&up.schedulerInfo.interval_hours?up.schedulerInfo.interval_hours+'h':'—'"></div></div>
+              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Next Run</div><div class="text-sm text-slate-700" x-text="up.schedulerInfo&&up.schedulerInfo.next_run?fmtDate(up.schedulerInfo.next_run):'—'"></div></div>
             </div>
-          </template>
+            <div x-show="!up.schedulerInfo" class="card text-slate-500 text-sm mb-4">Scheduler not available — agents run on demand.</div>
+            <template x-if="isAdmin()&&up.schedulerInfo">
+              <div class="flex flex-wrap gap-3 items-end">
+                <button class="btn-secondary" @click="upToggle()" x-text="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'⏸ Pause':'▶ Resume'"></button>
+                <form class="flex gap-2 items-end" @submit.prevent="upSetInterval()">
+                  <div><label class="label">Set Interval (hours)</label><input x-model="up.intervalInput" type="number" step="0.25" min="0.25" max="168" class="input w-36" placeholder="e.g. 2"></div>
+                  <button type="submit" class="btn-secondary">Apply</button>
+                </form>
+              </div>
+            </template>
+          </div>
         </div>
 
         <div x-show="up.tab==='scan'">
@@ -71,7 +74,7 @@
         </div>
 
         <div x-show="up.tab==='manual'">
-          <div class="card max-w-lg">
+          <div class="card">
             <h3 class="font-semibold text-slate-800 mb-4">Manual Unpick</h3>
             <div class="space-y-4">
               <div>
@@ -95,15 +98,15 @@
               </button>
             </div>
             <template x-if="up.manualResult">
-              <div class="mt-5 p-4 rounded-xl" :class="up.manualResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
-                <p class="text-sm" :class="up.manualResult.ok?'text-emerald-700':'text-red-700'" x-text="up.manualResult.message"></p>
+              <div class="mt-5 p-4 rounded-xl" :class="up.manualResult.type==='warning'?'bg-amber-50 border border-amber-200':up.manualResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
+                <p class="text-sm" :class="up.manualResult.type==='warning'?'text-amber-700':up.manualResult.ok?'text-emerald-700':'text-red-700'" x-text="up.manualResult.message"></p>
               </div>
             </template>
           </div>
         </div>
 
         <div x-show="up.tab==='partial'">
-          <div class="card max-w-lg">
+          <div class="card">
             <h3 class="font-semibold text-slate-800 mb-4">Partial Unpick</h3>
             <div class="space-y-4">
               <div><label class="label">Database</label><select x-model="up.partialDbId" class="select"><option value="">Select database…</option><template x-for="db in dbConfigs" :key="db.id"><option :value="db.id" x-text="db.name||db.id"></option></template></select></div>
@@ -113,7 +116,7 @@
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label class="label">Item Number</label><input x-model="up.partialItemNum" class="input" placeholder="ITEM001"></div>
-                <div><label class="label">Quantity</label><input x-model="up.partialQty" type="number" step="0.01" min="0.01" class="input" placeholder="1.00"></div>
+                <div><label class="label">Quantity</label><input x-model="up.partialQty" type="number" step="1" min="1" class="input" placeholder="1"></div>
               </div>
               <button class="btn-primary w-full sm:w-auto justify-center" @click="upPartialUnpick()" :disabled="up.partialLoading">
                 <svg x-show="up.partialLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -121,8 +124,8 @@
               </button>
             </div>
             <template x-if="up.partialResult">
-              <div class="mt-5 p-4 rounded-xl" :class="up.partialResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
-                <p class="text-sm" :class="up.partialResult.ok?'text-emerald-700':'text-red-700'" x-text="up.partialResult.message"></p>
+              <div class="mt-5 p-4 rounded-xl" :class="up.partialResult.type==='warning'?'bg-amber-50 border border-amber-200':up.partialResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
+                <p class="text-sm" :class="up.partialResult.type==='warning'?'text-amber-700':up.partialResult.ok?'text-emerald-700':'text-red-700'" x-text="up.partialResult.message"></p>
               </div>
             </template>
           </div>

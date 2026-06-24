@@ -82,7 +82,7 @@
         </div>
 
         <div x-show="dr.tab==='manual'">
-          <div class="card max-w-lg">
+          <div class="card">
             <h3 class="font-semibold text-slate-800 mb-4">Manual Device / Employee Reset</h3>
             <div class="space-y-4">
               <div>
@@ -115,13 +115,13 @@
               </button>
             </div>
             <template x-if="dr.manualResult">
-              <div class="mt-5 p-4 rounded-xl" :class="dr.manualResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
+              <div class="mt-5 p-4 rounded-xl" :class="dr.manualResult.type==='warning'?'bg-amber-50 border border-amber-200':dr.manualResult.ok?'bg-emerald-50 border border-emerald-200':'bg-red-50 border border-red-200'">
                 <template x-if="dr.manualResult.ok">
                   <ul class="space-y-1.5">
                     <template x-for="s in dr.manualResult.steps"><li class="flex items-start gap-2 text-sm text-emerald-700"><span class="mt-0.5">✓</span><span x-text="s"></span></li></template>
                   </ul>
                 </template>
-                <template x-if="!dr.manualResult.ok"><p class="text-sm text-red-700" x-text="dr.manualResult.message"></p></template>
+                <template x-if="!dr.manualResult.ok"><p class="text-sm" :class="dr.manualResult.type==='warning'?'text-amber-700':'text-red-700'" x-text="dr.manualResult.message"></p></template>
               </div>
             </template>
           </div>

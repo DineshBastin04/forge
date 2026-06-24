@@ -195,10 +195,12 @@ def _resolve_pick_loc_conn(conn, wh_id, order_number, item_number, queries):
 
 def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None):
     """Full or partial unpick using a SQLAlchemy engine."""
-    log_unpick("INFO", "Processing started.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+    log_unpick("INFO", f"Processing started for order {order_number}, item {item_number}, warehouse {wh_id}.",
+               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
     queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
         with engine.begin() as conn:
+            # Step 1: Check picked quantity
             qty_row = execute_dynamic_query(conn, queries["find_picked_qty"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
             if not qty_row or not qty_row[0] or float(qty_row[0]) <= 0:
                 msg = "picked_quantity is 0 or NULL — skipping."
@@ -207,19 +209,28 @@ def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None
 
             actual = float(qty_row[0])
             q = qty if qty is not None else actual
+            log_unpick("INFO", f"Step 1: Found picked_quantity = {actual}, unpick_qty = {q}.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             if qty and qty > actual:
                 msg = f"unpick_qty ({qty}) exceeds picked_quantity ({actual})."
                 log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 return {"status": "WARNING", "message": msg}
 
+            # Step 2: Resolve pick location
             pick_loc = _resolve_pick_loc_conn(conn, wh_id, order_number, item_number, queries)
             if not pick_loc:
                 msg = "Could not resolve pick_location — skipping."
                 log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 return {"status": "WARNING", "message": msg}
+            log_unpick("INFO", f"Step 2: Resolved pick location = {pick_loc}.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+            # Step 3: Update pick detail (unstage & reduce picked qty)
             execute_dynamic_query(conn, queries["update_pick_detail"], {"q": q, "w": wh_id, "o": order_number, "i": item_number})
+            log_unpick("INFO", f"Step 3: Updated t_pick_detail — reduced picked_quantity by {q}, adjusted staged_quantity and status.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+            # Step 4: Inventory restoration based on item_hu_indicator
             loc_row = execute_dynamic_query(conn, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
             ihi = loc_row[0] if loc_row else None
 
@@ -227,24 +238,45 @@ def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None
                 si = execute_dynamic_query(conn, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
                 if si:
                     execute_dynamic_query(conn, queries["update_stored_qty_add"], {"q": q, "w": wh_id, "i": item_number, "l": pick_loc})
+                    log_unpick("INFO", f"Step 4a: Existing STORAGE record found at {pick_loc} — added {q} to actual_qty.",
+                               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 else:
                     execute_dynamic_query(conn, queries["update_stored_qty_move"], {"l": pick_loc, "q": q, "w": wh_id, "i": item_number, "o": order_number})
+                    log_unpick("INFO", f"Step 4a: No STORAGE record at {pick_loc} — moved order-type record back to STORAGE.",
+                               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 execute_dynamic_query(conn, queries["update_stored_qty_sub"], {"q": q, "w": wh_id, "i": item_number, "o": order_number})
                 execute_dynamic_query(conn, queries["delete_empty_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 4b: Reduced order-type stored_item qty by {q} and cleaned up empty records.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+
                 hu_row = execute_dynamic_query(conn, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
                 if hu_row:
                     h = hu_row[0]
                     execute_dynamic_query(conn, queries["update_hu_qty_sub"], {"q": q, "w": wh_id, "h": h, "i": item_number, "o": order_number})
                     execute_dynamic_query(conn, queries["delete_empty_hu_detail"], {"w": wh_id, "h": h, "i": item_number, "o": order_number})
+                    log_unpick("INFO", f"Step 4c: HU {h} — reduced hu_detail qty by {q} and cleaned up empty detail.",
+                               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                     if not execute_dynamic_query(conn, queries["check_hu_detail"], {"w": wh_id, "h": h}).fetchone():
                         execute_dynamic_query(conn, queries["delete_empty_hu_master"], {"w": wh_id, "h": h})
+                        log_unpick("INFO", f"Step 4d: HU {h} has no remaining details — deleted hu_master record.",
+                                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+                else:
+                    log_unpick("INFO", "Step 4c: No HU records found for this order-type — HU cleanup skipped.",
+                               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+
+                log_unpick("INFO", f"Step 4 (Case {ihi}): Inventory restoration complete at location {pick_loc}.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             else:
                 log_unpick("WARNING", f"Unknown item_hu_indicator '{ihi}' — skipping HU cleanup.",
                            order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+            # Step 5: Update work queue
             execute_dynamic_query(conn, queries["update_work_q"], {"w": wh_id, "o": order_number, "i": item_number})
+            log_unpick("INFO", "Step 5: Updated t_work_q status based on pick completion.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
-        log_unpick("INFO", "All steps committed.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", "All steps committed successfully.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         return {"status": "SUCCESS", "message": "Unpick completed."}
 
     except Exception as exc:
@@ -272,9 +304,12 @@ def _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries):
 
 def _do_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id, qty=None):
     """Full or partial unpick using a pyodbc connection."""
+    log_unpick("INFO", f"Processing started for order {order_number}, item {item_number}, warehouse {wh_id}.",
+               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
     cursor = conn.cursor()
     queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
+        # Step 1: Check picked quantity
         qty_row = execute_dynamic_query(cursor, queries["find_picked_qty"], {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
         if not qty_row or not qty_row[0] or float(qty_row[0]) <= 0:
             msg = "picked_quantity is 0 or NULL — nothing to unpick."
@@ -284,22 +319,30 @@ def _do_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id, qty=None):
 
         actual = float(qty_row[0])
         q = qty if qty is not None else actual
+        log_unpick("INFO", f"Step 1: Found picked_quantity = {actual}, unpick_qty = {q}.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         if qty and qty > actual:
             msg = f"unpick_qty ({qty}) exceeds picked_quantity ({actual})."
             log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             conn.rollback()
             return {"status": "WARNING", "message": msg}
 
+        # Step 2: Resolve pick location
         pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries)
         if not pick_loc:
             msg = "Could not resolve pick_location — skipping."
             log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             conn.rollback()
             return {"status": "WARNING", "message": msg}
+        log_unpick("INFO", f"Step 2: Resolved pick location = {pick_loc}.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+        # Step 3: Update pick detail
         execute_dynamic_query(cursor, queries["update_pick_detail"], {"q": q, "w": wh_id, "o": order_number, "i": item_number})
-        log_unpick("INFO", f"Step 1: {cursor.rowcount} row(s) updated.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", f"Step 3: Updated t_pick_detail — {cursor.rowcount} row(s), reduced picked_quantity by {q}.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+        # Step 4: Inventory restoration
         loc_row = execute_dynamic_query(cursor, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
         ihi = loc_row[0] if loc_row else None
 
@@ -307,27 +350,45 @@ def _do_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id, qty=None):
             si = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
             if si:
                 execute_dynamic_query(cursor, queries["update_stored_qty_add"], {"q": q, "w": wh_id, "i": item_number, "l": pick_loc})
+                log_unpick("INFO", f"Step 4a: Existing STORAGE record found at {pick_loc} — added {q} to actual_qty.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             else:
                 execute_dynamic_query(cursor, queries["update_stored_qty_move"], {"l": pick_loc, "q": q, "w": wh_id, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 4a: No STORAGE record at {pick_loc} — moved order-type record back to STORAGE.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
             execute_dynamic_query(cursor, queries["update_stored_qty_sub"], {"q": q, "w": wh_id, "i": item_number, "o": order_number})
             execute_dynamic_query(cursor, queries["delete_empty_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+            log_unpick("INFO", f"Step 4b: Reduced order-type stored_item qty by {q} and cleaned up empty records.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+
             hu_row = execute_dynamic_query(cursor, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
             if hu_row:
                 h = hu_row[0]
                 execute_dynamic_query(cursor, queries["update_hu_qty_sub"], {"q": q, "w": wh_id, "h": h, "i": item_number, "o": order_number})
                 execute_dynamic_query(cursor, queries["delete_empty_hu_detail"], {"w": wh_id, "h": h, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 4c: HU {h} — reduced hu_detail qty by {q} and cleaned up empty detail.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
                 if not execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": h}).fetchone():
                     execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": h})
-            log_unpick("INFO", f"Step 2 (Case {ihi}): Done.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+                    log_unpick("INFO", f"Step 4d: HU {h} has no remaining details — deleted hu_master record.",
+                               order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+            else:
+                log_unpick("INFO", "Step 4c: No HU records found for this order-type — HU cleanup skipped.",
+                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+            log_unpick("INFO", f"Step 4 (Case {ihi}): Inventory restoration complete at location {pick_loc}.",
+                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         else:
             log_unpick("WARNING", f"Unknown indicator '{ihi}' — skipping HU.",
                        order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
+        # Step 5: Update work queue
         execute_dynamic_query(cursor, queries["update_work_q"], {"w": wh_id, "o": order_number, "i": item_number})
-        log_unpick("INFO", f"Step 3: {cursor.rowcount} row(s) updated.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", f"Step 5: Updated t_work_q — {cursor.rowcount} row(s) updated.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
 
         conn.commit(); cursor.close()
-        log_unpick("INFO", "All steps committed.", order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", "All steps committed successfully.",
+                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
         return {"status": "SUCCESS", "message": "Unpick completed."}
 
     except Exception as exc:
@@ -479,51 +540,59 @@ def execute():
 
 def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
     """Full manual unpick using a pyodbc connection following the exact 3-step SQL flow."""
+    _kw = dict(order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+    log_unpick("INFO", "Processing started (manual full unpick).", **_kw)
     cursor = conn.cursor()
     queries = load_agent_queries("unpick", DEFAULT_QUERIES)
     try:
         # STEP 1: UNSTAGE & UNPICK
         execute_dynamic_query(cursor, queries["manual_unpick_update_pick"], {"o": order_number, "w": wh_id, "i": item_number})
-        log_unpick("INFO", f"Step 1: Unstage & Unpick. Updated {cursor.rowcount} row(s) in t_pick_detail.",
-                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO",
+                   f"Step 1 (t_pick_detail): Set picked_quantity=0, staged_quantity=0, status=RELEASED — {cursor.rowcount} row(s) updated.",
+                   **_kw)
 
         # STEP 2: RESOLVE PICK LOCATION
         pick_loc = _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries)
         if not pick_loc:
             msg = "Could not resolve pick_location."
-            log_unpick("WARNING", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+            log_unpick("WARNING", msg, **_kw)
             conn.rollback()
             return {"status": "WARNING", "message": msg}
+        log_unpick("INFO", f"Step 2: Resolved pick location: {pick_loc}.", **_kw)
 
         # GET ITEM HU INDICATOR
         row = execute_dynamic_query(cursor, queries["check_item_indicator"], {"w": wh_id, "l": pick_loc}).fetchone()
         ihi = row[0] if row else None
+        log_unpick("INFO", f"Item HU indicator at {pick_loc}: {ihi!r}.", **_kw)
 
         if ihi == 'I':
             # GET PICKED HU ID
             row = execute_dynamic_query(cursor, queries["find_hu_id"], {"w": wh_id, "i": item_number, "o": order_number}).fetchone()
             picked_hu_id = row[0] if row else None
+            log_unpick("INFO", f"Step 2 (Case I): Picked HU ID: {picked_hu_id or 'none'}.", **_kw)
 
-            # CHECK IF STORED ITEM STORAGE RECORD EXISTS AT PICK LOCATION
+            # RESTORE STORED ITEM
             exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
-
             if exists_stored:
                 execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
                 execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 2a (Case I): Existing STORAGE record at {pick_loc} — merged qty and deleted order-type record.", **_kw)
             else:
                 execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 2a (Case I): No STORAGE record at {pick_loc} — moved order-type record to STORAGE.", **_kw)
 
-            # DELETE FROM HU DETAIL
+            # DELETE FROM HU DETAIL & MASTER
             if picked_hu_id:
                 execute_dynamic_query(cursor, queries["manual_delete_hu_detail"], {"w": wh_id, "h": picked_hu_id, "i": item_number, "o": order_number})
-
-                # DELETE FROM HU MASTER IF EMPTY
+                log_unpick("INFO", f"Step 2b (Case I): HU detail for LP {picked_hu_id} deleted.", **_kw)
                 row = execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": picked_hu_id}).fetchone()
                 if not row:
                     execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": picked_hu_id})
-
-            log_unpick("INFO", f"Step 2 (Case I): Inventory restored to location {pick_loc}.",
-                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+                    log_unpick("INFO", f"Step 2c (Case I): HU master {picked_hu_id} removed (no remaining detail lines).", **_kw)
+                else:
+                    log_unpick("INFO", f"Step 2c (Case I): HU master {picked_hu_id} kept (other detail lines remain).", **_kw)
+            else:
+                log_unpick("INFO", "Step 2b (Case I): No HU ID found — HU cleanup skipped.", **_kw)
 
         elif ihi == 'H':
             # GET PICKED HU ID
@@ -535,62 +604,60 @@ def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
             if picked_hu_id:
                 row = execute_dynamic_query(cursor, queries["manual_get_distinct_item_count"], {"w": wh_id, "h": picked_hu_id}).fetchone()
                 item_count = row[0] if row else 0
+            log_unpick("INFO", f"Step 2 (Case H): Picked HU ID: {picked_hu_id or 'none'}, distinct item count on LP: {item_count}.", **_kw)
 
             if item_count == 1:
-                # SINGLE ITEM LP
+                # SINGLE ITEM LP — clean up old LP, restore inventory
                 execute_dynamic_query(cursor, queries["manual_delete_hu_detail"], {"w": wh_id, "h": picked_hu_id, "i": item_number, "o": order_number})
+                log_unpick("INFO", f"Step 2a (Case H - Single LP): HU detail for LP {picked_hu_id} deleted.", **_kw)
 
-                # DELETE FROM HU MASTER IF EMPTY
                 row = execute_dynamic_query(cursor, queries["check_hu_detail"], {"w": wh_id, "h": picked_hu_id}).fetchone()
                 if not row:
                     execute_dynamic_query(cursor, queries["delete_empty_hu_master"], {"w": wh_id, "h": picked_hu_id})
+                    log_unpick("INFO", f"Step 2b (Case H - Single LP): HU master {picked_hu_id} removed (empty).", **_kw)
 
-                # RESTORE STORED ITEM
                 exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
-
                 if exists_stored:
                     execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
                     execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+                    log_unpick("INFO", f"Step 2c (Case H - Single LP): Existing STORAGE at {pick_loc} — merged qty and deleted order-type record.", **_kw)
                 else:
                     execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
-
-                log_unpick("INFO", f"Step 2 (Case H - Single Item LP): Inventory restored to location {pick_loc}. LP {picked_hu_id} cleaned up.",
-                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+                    log_unpick("INFO", f"Step 2c (Case H - Single LP): No STORAGE at {pick_loc} — moved order-type record to STORAGE.", **_kw)
 
             elif item_count > 1:
-                # MULTI ITEM LP
+                # MULTI ITEM LP — create new LP, reassign item, restore inventory
                 import random
                 rand_num = random.randint(0, 99999999)
                 new_hu_id = f"UP{rand_num:08d}"
 
                 execute_dynamic_query(cursor, queries["manual_insert_hu_master"], {"h": new_hu_id, "l": pick_loc, "w": wh_id})
+                log_unpick("INFO", f"Step 2a (Case H - Multi LP): Created new LP {new_hu_id} at location {pick_loc}.", **_kw)
+
                 execute_dynamic_query(cursor, queries["manual_update_hu_detail_multi"], {"nh": new_hu_id, "l": pick_loc, "w": wh_id, "oh": picked_hu_id, "i": item_number})
+                log_unpick("INFO", f"Step 2b (Case H - Multi LP): HU detail for item {item_number} moved from LP {picked_hu_id} to new LP {new_hu_id}.", **_kw)
 
-                # RESTORE STORED ITEM
                 exists_stored = execute_dynamic_query(cursor, queries["check_stored_item"], {"w": wh_id, "i": item_number, "l": pick_loc}).fetchone()
-
                 if exists_stored:
                     execute_dynamic_query(cursor, queries["manual_update_stored_qty_add"], {"w": wh_id, "i": item_number, "l": pick_loc, "o": order_number})
                     execute_dynamic_query(cursor, queries["manual_delete_stored_item"], {"w": wh_id, "i": item_number, "o": order_number})
+                    log_unpick("INFO", f"Step 2c (Case H - Multi LP): Existing STORAGE at {pick_loc} — merged qty and deleted order-type record.", **_kw)
                 else:
                     execute_dynamic_query(cursor, queries["manual_update_stored_item_move"], {"l": pick_loc, "w": wh_id, "i": item_number, "o": order_number})
-
-                log_unpick("INFO", f"Step 2 (Case H - Multi Item LP): Created new LP {new_hu_id} at location {pick_loc}. Restored inventory.",
-                           order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+                    log_unpick("INFO", f"Step 2c (Case H - Multi LP): No STORAGE at {pick_loc} — moved order-type record to STORAGE.", **_kw)
+            else:
+                log_unpick("WARNING", f"Step 2 (Case H): No HU or item count is 0 — HU cleanup and inventory restore skipped.", **_kw)
 
         else:
-            log_unpick("WARNING", f"Unknown item_hu_indicator '{ihi}' — skipping step 2 inventory updates.",
-                       order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+            log_unpick("WARNING", f"Unknown item_hu_indicator '{ihi}' — skipping Step 2 inventory updates.", **_kw)
 
         # STEP 3: UPDATE WORK QUEUE
         execute_dynamic_query(cursor, queries["manual_update_work_q"], {"o": order_number, "w": wh_id, "i": item_number})
-        log_unpick("INFO", f"Step 3: Update Work Queue. Updated {cursor.rowcount} row(s) in t_work_q.",
-                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", f"Step 3 (t_work_q): Set work_status='U' — {cursor.rowcount} row(s) updated.", **_kw)
 
         conn.commit()
         cursor.close()
-        log_unpick("INFO", "Manual unpick completed successfully.",
-                   order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("INFO", "All steps committed successfully.", **_kw)
         return {"status": "SUCCESS", "message": "Manual unpick completed successfully."}
 
     except Exception as exc:
@@ -601,7 +668,7 @@ def _do_manual_unpick_pyodbc(conn, wh_id, order_number, item_number, run_id):
             pass
         msg = f"All changes rolled back. Error: {exc}"
         logger.exception("Manual unpick failed: %s", exc)
-        log_unpick("ERROR", msg, order_number=order_number, item_number=item_number, wh_id=wh_id, run_id=run_id)
+        log_unpick("ERROR", msg, **_kw)
         return {"status": "ERROR", "message": msg}
 
 
