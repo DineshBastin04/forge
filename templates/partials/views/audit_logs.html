@@ -4,16 +4,23 @@
           <button class="btn-secondary btn-sm" @click="auLoadAuditLogs()">↻ Refresh</button>
           <button class="btn-secondary btn-sm" @click="auDownloadAuditLogs('csv')">↓ CSV</button>
           <button class="btn-secondary btn-sm" @click="auDownloadAuditLogs('txt')">↓ TXT</button>
-          <span class="text-slate-500 text-sm" x-text="au.auditLogs.length+' entries'"></span>
+          <span class="text-slate-500 text-sm" x-text="filteredAuditLogs().length+' / '+au.auditLogs.length+' entries'"></span>
           <input x-model="au.auditSearch" type="text" class="input btn-sm w-48 ml-auto font-normal" placeholder="Search logs...">
         </div>
         <div x-show="au.auditLoading" class="text-slate-500 text-sm p-4">Loading…</div>
         <div x-show="!au.auditLoading&&filteredAuditLogs().length===0" class="card text-slate-500 text-sm">No matching audit entries found.</div>
         <div x-show="!au.auditLoading&&filteredAuditLogs().length>0" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="overflow-x-auto"><table class="min-w-full">
-            <thead><tr><th class="th">Timestamp</th><th class="th">Username</th><th class="th">Action</th><th class="th">Target</th><th class="th">IP Address</th><th class="th"></th></tr></thead>
+            <thead><tr>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetAuditSort('timestamp')">Timestamp <span x-show="au.auditSortField==='timestamp'" x-text="au.auditSortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetAuditSort('username')">Username <span x-show="au.auditSortField==='username'" x-text="au.auditSortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetAuditSort('action')">Action <span x-show="au.auditSortField==='action'" x-text="au.auditSortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th">Target</th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetAuditSort('ip')">IP Address <span x-show="au.auditSortField==='ip'" x-text="au.auditSortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th"></th>
+            </tr></thead>
             <tbody>
-              <template x-for="log in filteredAuditLogs()" :key="log.id">
+              <template x-for="log in paginatedAuditLogs()" :key="log.id">
                 <tr>
                   <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(log.timestamp)"></td>
                   <td class="td font-medium text-slate-800" x-text="log.username"></td>
@@ -27,5 +34,14 @@
               </template>
             </tbody>
           </table></div>
+        </div>
+        <div x-show="!au.auditLoading && auAuditPageCount() > 1" class="flex items-center justify-between mt-4">
+          <span class="text-xs text-slate-500">Page <span x-text="au.auditPage"></span> of <span x-text="auAuditPageCount()"></span></span>
+          <div class="flex gap-1">
+            <button class="btn-secondary btn-sm" @click="au.auditPage=1" :disabled="au.auditPage===1">«</button>
+            <button class="btn-secondary btn-sm" @click="au.auditPage--" :disabled="au.auditPage===1">‹</button>
+            <button class="btn-secondary btn-sm" @click="au.auditPage++" :disabled="au.auditPage>=auAuditPageCount()">›</button>
+            <button class="btn-secondary btn-sm" @click="au.auditPage=auAuditPageCount()" :disabled="au.auditPage>=auAuditPageCount()">»</button>
+          </div>
         </div>
       </div>

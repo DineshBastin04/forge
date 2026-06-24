@@ -296,9 +296,11 @@
         -webkit-backdrop-filter: saturate(1.12) brightness(1.04);
       }
     }
-    .ripple-overlay {
-      animation: backdropRippleLight 15s ease-in-out infinite alternate;
-    }
-    html.dark .ripple-overlay {
-      animation: backdropRippleDark 15s ease-in-out infinite alternate;
+    @media (prefers-reduced-motion: no-preference) {
+      .ripple-overlay {
+        animation: backdropRippleLight 15s ease-in-out infinite alternate;
+      }
+      html.dark .ripple-overlay {
+        animation: backdropRippleDark 15s ease-in-out infinite alternate;
+      }
     }

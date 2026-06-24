@@ -13,7 +13,15 @@
         <div x-show="au.loading" class="text-slate-500 text-sm p-4">Loading…</div>
         <div x-show="!au.loading" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="overflow-x-auto"><table class="min-w-full">
-            <thead><tr><th class="th">Name</th><th class="th">Username</th><th class="th">Role</th><th class="th">Agent Permissions</th><th class="th">Status</th><th class="th">Last Login</th><th class="th"></th></tr></thead>
+            <thead><tr>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetSort('display_name')">Name <span x-show="au.sortField==='display_name'" x-text="au.sortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetSort('username')">Username <span x-show="au.sortField==='username'" x-text="au.sortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetSort('role')">Role <span x-show="au.sortField==='role'" x-text="au.sortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th">Agent Permissions</th>
+              <th class="th">Status</th>
+              <th class="th cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-800/50" @click="auSetSort('last_login')">Last Login <span x-show="au.sortField==='last_login'" x-text="au.sortDir==='asc'?'↑':'↓'" class="text-blue-500 ml-1 text-xs"></span></th>
+              <th class="th"></th>
+            </tr></thead>
             <tbody>
               <template x-for="u in filteredUsers()" :key="u.id">
                 <tr>
@@ -30,7 +38,7 @@
                     </div>
                   </td>
                   <td class="td"><span class="badge" :class="u.is_active?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'" x-text="u.is_active?'Active':'Inactive'"></span></td>
-                  <td class="td text-xs text-slate-500 whitespace-nowrap" x-text="fmtDate(u.last_login)"></td>
+                  <td class="td text-xs whitespace-nowrap" :class="u.last_login ? 'text-slate-500' : 'text-slate-400 italic'" x-text="u.last_login ? fmtDate(u.last_login) : 'Never'"></td>
                   <td class="td"><div class="flex items-center gap-2 justify-end">
                     <button class="btn-secondary btn-sm" x-show="isSuperadmin() || !['admin','superadmin'].includes(u.role)" @click="auOpenEdit(u)">Edit</button>
                     <button x-show="(u.is_active&&u.id!==(user&&user.id)) && (isSuperadmin() || !['admin','superadmin'].includes(u.role))" class="btn-danger btn-sm" @click="auDeactivate(u.id)">Deactivate</button>

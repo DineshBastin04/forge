@@ -1,8 +1,13 @@
     <header class="bg-white/80 dark:bg-[#0a0f1a]/80 backdrop-blur-xl border-b border-slate-200/80 dark:border-slate-800/60 h-16 flex items-center px-4 lg:px-6 gap-4 flex-shrink-0 transition-all duration-300">
-      <button @click="sidebarOpen=!sidebarOpen" class="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+      <button @click="sidebarOpen=!sidebarOpen" aria-label="Open navigation menu" class="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
         <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <h2 class="flex-1 font-semibold text-slate-800 dark:text-slate-100 text-base truncate" x-text="pageTitle()"></h2>
+      <div class="flex-1 min-w-0">
+        <h2 class="font-semibold text-slate-800 dark:text-slate-100 text-sm leading-tight truncate" x-text="pageTitle()"></h2>
+        <p x-show="pageSubTitle()" class="text-xs text-slate-400 dark:text-slate-500 leading-tight mt-0.5 truncate">
+          <span class="mr-0.5">›</span><span x-text="pageSubTitle()"></span>
+        </p>
+      </div>
       <div class="flex items-center gap-3">
         <span class="hidden sm:flex badge" :class="roleBadge(user&&user.role)" x-text="user&&user.role"></span>
       </div>

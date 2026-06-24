@@ -7,20 +7,25 @@ function app() {
     settings: { default_theme: 'dark', saving: false },
     dr: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
           manualDbId:'', manualDeviceId:'', manualInputType:'device', manualLoading:false, manualResult:null,
-          logs:[], logsLoading:false, logSearch:'', logLevel:'',
+          logs:[], logsLoading:false, logSearch:'', logLevel:'', logLive:false, logLiveTimer:null,
+          logFromDate:'', logToDate:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[] },
     up: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[],
           manualDbId:'', manualWhId:'', manualOrderNum:'', manualItemNum:'', manualLoading:false, manualResult:null,
           partialDbId:'', partialWhId:'', partialOrderNum:'', partialItemNum:'', partialQty:'',
-          partialLoading:false, partialResult:null, logs:[], logsLoading:false, logSearch:'', logLevel:'' },
+          partialLoading:false, partialResult:null, logs:[], logsLoading:false, logSearch:'', logLevel:'',
+          logLive:false, logLiveTimer:null, logFromDate:'', logToDate:'' },
     au: { list:[], loading:false, modal:false, editId:null, saving:false, userSearch:'',
+          sortField:'', sortDir:'asc', formInitial:null,
           form:{username:'',display_name:'',password:'',role:'user',agent_perms:[],is_active:true},
-          auditLogs:[], auditLoading:false, auditSearch:'', auditDetailModal:false, activeAudit:null },
-    dbc: { list:[], loading:false, modal:false, editId:null, modalTab:'connection', saving:false,
+          auditLogs:[], auditLoading:false, auditSearch:'', auditDetailModal:false, activeAudit:null,
+          auditSortField:'timestamp', auditSortDir:'desc', auditPage:1, auditPageSize:25 },
+    dbc: { list:[], loading:false, modal:false, editId:null, modalTab:'connection', step:1, saving:false,
            testConnLoading:false, testConnResult:null,
            formTestLoading:false, formTestResult:null,
            logFormTestLoading:false, logFormTestResult:null,
+           formInitial:null,
            form:{name:'',db_type:'mssql',
                  db:{server:'',port:'',database:'',username:'',password:'',driver:''},
                  use_log_db:false,
@@ -32,7 +37,7 @@ function app() {
     myHistoryLoading: false,
     myHistorySearch: '',
     aw: { list:[], loading:false, modal:false, editId:null, saving:false, error:'',
-          form:{id:'', name:'', description:'', flow_yaml:''} },
+          form:{id:'', name:'', description:'', flow_yaml:''}, formInitial:null },
 
     async init() {
       // 1. Fetch system default theme from settings endpoint
@@ -106,10 +111,7 @@ function app() {
       } catch (e) {}
     },
     _dv() {
-      if (this.hasAgentPerm('device_reset')) return 'device-reset';
-      if (this.hasAgentPerm('unpick')) return 'unpick';
-      if (this.isAdmin()) return 'users';
-      return 'my-history';
+      return 'dashboard';
     },
     isAdmin()      { return this.user && ['admin','superadmin'].includes(this.user.role); },
     isSuperadmin() { return this.user && this.user.role === 'superadmin'; },
@@ -117,11 +119,20 @@ function app() {
     canSeeUnpick()      { return this.hasAgentPerm('unpick'); },
     hasAgentPerm(p) { return !!this.user && (this.isAdmin() || (this.user.agent_perms||[]).includes(p)); },
     pageTitle() { return {dashboard:'Dashboard',['device-reset']:'Device Reset Agent',unpick:'Unpick Agent',users:'User Management',['db-config']:'DB Configurations',['audit-logs']:'System Audit Logs',['my-history']:'My Audit History',['agent-workflows']:'Agent Workflows',['system-settings']:'System Settings'}[this.view]||'Tychons Wi-Agents'; },
-    nav(v) { this.view=v; this.sidebarOpen=false; this._lvd(); },
+    pageSubTitle() {
+      if (this.view === 'device-reset') return {scheduler:'Scheduler',scan:'Auto Scan',manual:'Manual Reset',logs:'Logs'}[this.dr.tab] || '';
+      if (this.view === 'unpick') return {scheduler:'Scheduler',scan:'Auto Scan',manual:'Manual Unpick',partial:'Partial Unpick',logs:'Logs'}[this.up.tab] || '';
+      return '';
+    },
+    nav(v) {
+      if (this.dr.logLiveTimer) { clearInterval(this.dr.logLiveTimer); this.dr.logLiveTimer = null; this.dr.logLive = false; }
+      if (this.up.logLiveTimer) { clearInterval(this.up.logLiveTimer); this.up.logLiveTimer = null; this.up.logLive = false; }
+      this.view=v; this.sidebarOpen=false; this._lvd();
+    },
     _lvd() {
       if (this.view==='dashboard') { this.drLoadScheduler(); this.upLoadScheduler(); }
-      else if (this.view==='device-reset') this.drLoadScheduler();
-      else if (this.view==='unpick') this.upLoadScheduler();
+      else if (this.view==='device-reset') { this.drLoadScheduler(); if (this.dr.scanResults.length > 0 && this.dr.tab === 'scheduler') this.dr.tab = 'scan'; }
+      else if (this.view==='unpick') { this.upLoadScheduler(); if (this.up.scanResults.length > 0 && this.up.tab === 'scheduler') this.up.tab = 'scan'; }
       else if (this.view==='users') this.auLoad();
       else if (this.view==='db-config') this.dbcLoad();
       else if (this.view==='audit-logs') this.auLoadAuditLogs();
@@ -147,7 +158,15 @@ function app() {
       if (!r.ok) throw new Error(d.error||d.message||'Request failed');
       return d;
     },
-    toast(msg,type='info') { const id=Date.now()+Math.random(); this.toasts.push({id,msg,type}); setTimeout(()=>{this.toasts=this.toasts.filter(t=>t.id!==id);},5000); },
+    toast(msg, type='info') {
+      const id = Date.now() + Math.random();
+      let timerId = null;
+      const dismiss = () => { this.toasts = this.toasts.filter(t => t.id !== id); };
+      const pause = () => clearTimeout(timerId);
+      const resume = () => { timerId = setTimeout(dismiss, 5000); };
+      this.toasts.push({ id, msg, type, pause, resume });
+      resume();
+    },
     confirmDialog(msg) { return new Promise(resolve => { this.confirm = { show: true, msg, resolve }; }); },
     confirmOk()     { if (this.confirm.resolve) this.confirm.resolve(true);  this.confirm = { show: false, msg: '', resolve: null }; },
     confirmCancel() { if (this.confirm.resolve) this.confirm.resolve(false); this.confirm = { show: false, msg: '', resolve: null }; },
@@ -159,6 +178,7 @@ function app() {
         if(d){
           this.user=d.user;
           this.loginForm={username:'',password:'',error:'',loading:false};
+          await this.loadAgents();
           this.view=this._dv();
           await this.loadDbConfigs();
           this._lvd();
@@ -184,7 +204,17 @@ function app() {
     async drSetInterval(){const h=parseFloat(this.dr.intervalInput);if(!h||h<.25||h>168){this.toast('Interval must be 0.25–168 hours','error');return;}try{await this.api('/api/v0/device_reset_agent/scheduler_interval',{method:'POST',body:JSON.stringify({hours:h})});this.dr.intervalInput='';await this.drLoadScheduler();this.toast(`Interval set to ${h}h`,'success');}catch(e){this.toast(e.message,'error');}},
     async drManualReset(){const typeLabel=this.dr.manualInputType==='device'?'Device':'Employee';if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast(`Select DB and enter ${typeLabel} ID`,'error');return;}if(!await this.confirmDialog(`Reset ${this.dr.manualInputType==='device'?'device':'employee'} "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim(),input_type:this.dr.manualInputType})});if(d.type==='warning'){this.dr.manualResult={ok:false,type:'warning',message:d.message};this.toast(d.message,'warning');}else{this.dr.manualResult={ok:true,type:'success',steps:d.steps||[]};this.toast(`${typeLabel} reset successful`,'success');}}catch(e){this.dr.manualResult={ok:false,type:'error',message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
     async drLoadLogs(){this.dr.logsLoading=true;try{const d=await this.api('/api/v0/device_reset_logs');this.dr.logs=d?d.logs:[];}catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}},
-    drDownloadLogs(fmt){window.location.href=`/api/v0/device_reset_logs/download?format=${fmt}`;},
+    drDownloadLogs(fmt) {
+      let url = `/api/v0/device_reset_logs/download?format=${fmt}`;
+      if (this.dr.logFromDate) url += `&from=${encodeURIComponent(this.dr.logFromDate)}`;
+      if (this.dr.logToDate) url += `&to=${encodeURIComponent(this.dr.logToDate)}`;
+      window.location.href = url;
+    },
+    drToggleLive() {
+      this.dr.logLive = !this.dr.logLive;
+      if (this.dr.logLive) { this.drLoadLogs(); this.dr.logLiveTimer = setInterval(() => this.drLoadLogs(), 10000); }
+      else { clearInterval(this.dr.logLiveTimer); this.dr.logLiveTimer = null; }
+    },
     async drAutoScan(){
       if(!this.dr.scanDbId){this.toast('Select a database','error');return;}
       this.dr.scanLoading=true;
@@ -229,10 +259,25 @@ function app() {
     async upManualUnpick(){const{manualDbId:db_config_id,manualWhId:wh_id,manualOrderNum:order_number,manualItemNum:item_number}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number){this.toast('All fields are required','error');return;}this.up.manualLoading=true;this.up.manualResult=null;try{const d=await this.api('/api/v0/unpick_agent/manual_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number})});this.up.manualResult={ok:d.type!=='error',type:d.type||'success',message:d.message};this.toast(d.type==='warning'?d.message:'Manual unpick successful',d.type||'success');}catch(e){this.up.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.manualLoading=false;}},
     async upPartialUnpick(){const{partialDbId:db_config_id,partialWhId:wh_id,partialOrderNum:order_number,partialItemNum:item_number,partialQty}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number||!partialQty){this.toast('All fields are required','error');return;}this.up.partialLoading=true;this.up.partialResult=null;try{const d=await this.api('/api/v0/unpick_agent/partial_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number,unpick_qty:parseInt(partialQty,10)})});this.up.partialResult={ok:d.type!=='error',type:d.type||'success',message:d.message};this.toast(d.type==='warning'?d.message:'Partial unpick successful',d.type||'success');}catch(e){this.up.partialResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.partialLoading=false;}},
     async upLoadLogs(){this.up.logsLoading=true;try{const d=await this.api('/api/v0/unpick_agent/logs');this.up.logs=d?d.logs:[];}catch(e){this.up.logs=[];}finally{this.up.logsLoading=false;}},
-    upDownloadLogs(fmt){window.location.href=`/api/v0/unpick_agent/logs/download?format=${fmt}`;},
+    upDownloadLogs(fmt) {
+      let url = `/api/v0/unpick_agent/logs/download?format=${fmt}`;
+      if (this.up.logFromDate) url += `&from=${encodeURIComponent(this.up.logFromDate)}`;
+      if (this.up.logToDate) url += `&to=${encodeURIComponent(this.up.logToDate)}`;
+      window.location.href = url;
+    },
+    upToggleLive() {
+      this.up.logLive = !this.up.logLive;
+      if (this.up.logLive) { this.upLoadLogs(); this.up.logLiveTimer = setInterval(() => this.upLoadLogs(), 10000); }
+      else { clearInterval(this.up.logLiveTimer); this.up.logLiveTimer = null; }
+    },
     async auLoad(){this.au.loading=true;try{const d=await this.api('/api/v0/admin/users');this.au.list=d?.users||[];}catch(e){this.toast(e.message,'error');}finally{this.au.loading=false;}},
-    auOpenCreate(){this.au.editId=null;this.au.form={username:'',display_name:'',password:'',role:'user',agent_perms:[],is_active:true};this.au.modal=true;},
-    auOpenEdit(u){this.au.editId=u.id;this.au.form={username:u.username,display_name:u.display_name||u.username,password:'',role:u.role,agent_perms:[...u.agent_perms],is_active:u.is_active};this.au.modal=true;},
+    auOpenCreate(){this.au.editId=null;this.au.form={username:'',display_name:'',password:'',role:'user',agent_perms:[],is_active:true};this.au.formInitial=JSON.stringify(this.au.form);this.au.modal=true;},
+    auOpenEdit(u){this.au.editId=u.id;this.au.form={username:u.username,display_name:u.display_name||u.username,password:'',role:u.role,agent_perms:[...u.agent_perms],is_active:u.is_active};this.au.formInitial=JSON.stringify(this.au.form);this.au.modal=true;},
+    async auCloseModal() {
+      const dirty = JSON.stringify(this.au.form) !== this.au.formInitial;
+      if (dirty && !await this.confirmDialog('You have unsaved changes. Discard them?')) return;
+      this.au.modal = false;
+    },
     auTogglePerm(p){const i=this.au.form.agent_perms.indexOf(p);if(i===-1)this.au.form.agent_perms.push(p);else this.au.form.agent_perms.splice(i,1);},
     async auSave(){this.au.saving=true;try{if(this.au.editId){const p={display_name:this.au.form.display_name,role:this.au.form.role,agent_perms:this.au.form.agent_perms,is_active:this.au.form.is_active};if(this.au.form.password)p.password=this.au.form.password;await this.api(`/api/v0/admin/users/${this.au.editId}`,{method:'PATCH',body:JSON.stringify(p)});this.toast('User updated','success');}else{await this.api('/api/v0/admin/users',{method:'POST',body:JSON.stringify(this.au.form)});this.toast('User created','success');}this.au.modal=false;await this.auLoad();}catch(e){this.toast(e.message,'error');}finally{this.au.saving=false;}},
     async auDeactivate(id){if(!await this.confirmDialog('Deactivate this user? They will lose access immediately.'))return;try{await this.api(`/api/v0/admin/users/${id}`,{method:'DELETE'});this.toast('User deactivated','success');await this.auLoad();}catch(e){this.toast(e.message,'error');}},
@@ -265,14 +310,34 @@ function app() {
     },
     filteredAuditLogs() {
       const q = (this.au.auditSearch || '').toLowerCase().trim();
-      if (!q) return this.au.auditLogs;
-      return this.au.auditLogs.filter(log => {
+      let list = q ? this.au.auditLogs.filter(log => {
         const username = (log.username || '').toLowerCase();
         const action = (log.action || '').toLowerCase();
         const target = (log.target || '').toLowerCase();
-        const ip = (log.details.ip_address || '').toLowerCase();
+        const ip = ((log.details && log.details.ip_address) || '').toLowerCase();
         return username.includes(q) || action.includes(q) || target.includes(q) || ip.includes(q);
-      });
+      }) : [...this.au.auditLogs];
+      if (this.au.auditSortField) {
+        list.sort((a, b) => {
+          const av = (this.au.auditSortField === 'ip' ? ((a.details && a.details.ip_address) || '') : (a[this.au.auditSortField] || '')).toString();
+          const bv = (this.au.auditSortField === 'ip' ? ((b.details && b.details.ip_address) || '') : (b[this.au.auditSortField] || '')).toString();
+          return this.au.auditSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
+      }
+      return list;
+    },
+    auSetAuditSort(field) {
+      if (this.au.auditSortField === field) this.au.auditSortDir = this.au.auditSortDir === 'asc' ? 'desc' : 'asc';
+      else { this.au.auditSortField = field; this.au.auditSortDir = 'asc'; }
+      this.au.auditPage = 1;
+    },
+    paginatedAuditLogs() {
+      const logs = this.filteredAuditLogs();
+      const start = (this.au.auditPage - 1) * this.au.auditPageSize;
+      return logs.slice(start, start + this.au.auditPageSize);
+    },
+    auAuditPageCount() {
+      return Math.max(1, Math.ceil(this.filteredAuditLogs().length / this.au.auditPageSize));
     },
     async loadAgents() {
       try {
@@ -322,17 +387,27 @@ function app() {
       this.aw.editId = null;
       this.aw.error = '';
       this.aw.form = { id:'', name:'', description:'', flow_yaml:'' };
+      this.aw.formInitial = JSON.stringify(this.aw.form);
       this.aw.modal = true;
     },
     awOpenEdit(agent) {
       this.aw.editId = agent.id;
       this.aw.error = '';
       this.aw.form = { id: agent.id, name: agent.name, description: agent.description || '', flow_yaml: agent.flow_yaml || '' };
+      this.aw.formInitial = JSON.stringify(this.aw.form);
       this.aw.modal = true;
+    },
+    async awCloseModal() {
+      const dirty = JSON.stringify(this.aw.form) !== this.aw.formInitial;
+      if (dirty && !await this.confirmDialog('You have unsaved changes. Discard them?')) return;
+      this.aw.modal = false;
     },
     async awSave() {
       this.aw.saving = true;
       this.aw.error = '';
+      if (this.aw.form.flow_yaml && typeof jsyaml !== 'undefined') {
+        try { jsyaml.load(this.aw.form.flow_yaml); } catch(e) { this.aw.error = `YAML syntax error: ${e.message}`; this.aw.saving = false; return; }
+      }
       try {
         if (this.aw.editId) {
           await this.api(`/api/v0/admin/agents/${this.aw.editId}`, {
@@ -374,6 +449,7 @@ function app() {
     dbcOpenCreate(){
       this.dbc.editId=null;
       this.dbc.modalTab='connection';
+      this.dbc.step=1;
       this.dbc.testConnResult=null;
       this.dbc.formTestResult=null;
       this.dbc.formTestLoading=false;
@@ -387,11 +463,13 @@ function app() {
         log_db:{server:'',port:'',database:'',username:'',password:'',driver:''},
         notify:{teams_webhook:'',slack_webhook:'',report_after_run:false,on_error:true,on_warning:false}
       };
+      this.dbc.formInitial=JSON.stringify(this.dbc.form);
       this.dbc.modal=true;
     },
     dbcOpenEdit(c){
       this.dbc.editId=c.id;
       this.dbc.modalTab='connection';
+      this.dbc.step=1;
       this.dbc.testConnResult=null;
       this.dbc.formTestResult=null;
       this.dbc.formTestLoading=false;
@@ -405,7 +483,18 @@ function app() {
         log_db:c.log_db ? {...c.log_db,password:''} : {server:'',port:'',database:'',username:'',password:'',driver:''},
         notify:{teams_webhook:'',slack_webhook:'',report_after_run:false,on_error:true,on_warning:false,...c.notify}
       };
+      this.dbc.formInitial=JSON.stringify(this.dbc.form);
       this.dbc.modal=true;
+    },
+    async dbcCloseModal() {
+      const dirty = JSON.stringify(this.dbc.form) !== this.dbc.formInitial;
+      if (dirty && !await this.confirmDialog('You have unsaved changes. Discard them?')) return;
+      this.dbc.modal = false;
+    },
+    dbcNextStep() {
+      if (this.dbc.step === 1 && !this.dbc.form.name.trim()) { this.toast('Configuration name is required', 'error'); return; }
+      if (this.dbc.step === 2 && !this.dbc.form.db.server.trim()) { this.toast('Server / Host is required', 'error'); return; }
+      this.dbc.step = Math.min(3, this.dbc.step + 1);
     },
     dbcDefaultPort(){return this.dbc.form.db_type==='oracle'?'1521':'1433';},
     async dbcSave(){
@@ -485,12 +574,23 @@ function app() {
     async saveProfile(){this.profile.saving=true;try{const p={};if(this.profile.form.display_name.trim())p.display_name=this.profile.form.display_name.trim();if(this.profile.form.new_password){p.current_password=this.profile.form.current_password;p.new_password=this.profile.form.new_password;}await this.api('/api/v0/auth/profile',{method:'PATCH',body:JSON.stringify(p)});if(p.display_name)this.user={...this.user,display_name:p.display_name};if(this.profile.form.new_password){this.user.force_change_password=false;}this.profile.modal=false;this.toast('Profile updated','success');}catch(e){this.toast(e.message,'error');}finally{this.profile.saving=false;}},
     filteredUsers() {
       const q = (this.au.userSearch || '').toLowerCase().trim();
-      if (!q) return this.au.list;
-      return this.au.list.filter(u =>
+      let list = q ? this.au.list.filter(u =>
         (u.username||'').toLowerCase().includes(q) ||
         (u.display_name||'').toLowerCase().includes(q) ||
         (u.role||'').toLowerCase().includes(q)
-      );
+      ) : [...this.au.list];
+      if (this.au.sortField) {
+        list.sort((a, b) => {
+          const av = (a[this.au.sortField] || '').toString();
+          const bv = (b[this.au.sortField] || '').toString();
+          return this.au.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
+      }
+      return list;
+    },
+    auSetSort(field) {
+      if (this.au.sortField === field) this.au.sortDir = this.au.sortDir === 'asc' ? 'desc' : 'asc';
+      else { this.au.sortField = field; this.au.sortDir = 'asc'; }
     },
     relTime(ts) {
       if (!ts) return '—';

@@ -128,8 +128,9 @@
         </div>
 
         <div x-show="dr.tab==='logs'">
-          <div class="flex items-center gap-3 mb-4 flex-wrap">
-            <button class="btn-secondary btn-sm" @click="drLoadLogs()">↻ Refresh</button>
+          <div class="flex items-center gap-3 mb-3 flex-wrap">
+            <button class="btn-secondary btn-sm" @click="drLoadLogs()" :disabled="dr.logLive">↻ Refresh</button>
+            <button class="btn-secondary btn-sm" :class="dr.logLive ? 'text-emerald-600 border-emerald-400 bg-emerald-50' : ''" @click="drToggleLive()" x-text="dr.logLive ? '⏸ Live' : '▶ Live'"></button>
             <button class="btn-secondary btn-sm" @click="drDownloadLogs('csv')">↓ CSV</button>
             <button class="btn-secondary btn-sm" @click="drDownloadLogs('txt')">↓ TXT</button>
             <select x-model="dr.logLevel" class="select btn-sm w-32 font-normal">
@@ -139,6 +140,12 @@
               <option value="ERROR">ERROR</option>
             </select>
             <input x-model="dr.logSearch" type="text" class="input btn-sm w-48 font-normal" placeholder="Search logs…">
+          </div>
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="text-xs text-slate-500">Export from:</span>
+            <input x-model="dr.logFromDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
+            <span class="text-xs text-slate-500">to:</span>
+            <input x-model="dr.logToDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
             <span class="text-slate-500 text-sm ml-auto" x-text="filteredDrLogs().length+' / '+dr.logs.length+' entries'"></span>
           </div>
           <div x-show="dr.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>

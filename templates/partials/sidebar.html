@@ -32,10 +32,16 @@
               <svg x-show="agent.id==='unpick'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               <span class="flex-1" x-text="agent.name"></span>
               <template x-if="agent.id==='device_reset'">
-                <span x-show="dr.schedulerInfo" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+                <span x-show="dr.schedulerInfo" class="flex items-center gap-1 flex-shrink-0">
+                  <span :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full"></span>
+                  <span class="text-[10px] font-semibold leading-none" :class="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'text-emerald-600 dark:text-emerald-400':'text-yellow-600 dark:text-yellow-400'" x-text="dr.schedulerInfo&&dr.schedulerInfo.running&&!dr.schedulerInfo.paused?'ON':'OFF'"></span>
+                </span>
               </template>
               <template x-if="agent.id==='unpick'">
-                <span x-show="up.schedulerInfo" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+                <span x-show="up.schedulerInfo" class="flex items-center gap-1 flex-shrink-0">
+                  <span :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-500':'bg-yellow-500'" class="w-2 h-2 rounded-full"></span>
+                  <span class="text-[10px] font-semibold leading-none" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'text-emerald-600 dark:text-emerald-400':'text-yellow-600 dark:text-yellow-400'" x-text="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'ON':'OFF'"></span>
+                </span>
               </template>
             </button>
           </template>
