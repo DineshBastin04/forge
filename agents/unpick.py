@@ -10,6 +10,7 @@ from sqlalchemy import text as _text
 from auth import require_agent, admin_required, superadmin_required, log_audit_action, load_agent_queries, execute_dynamic_query
 from db import get_engine, pyodbc_connect
 from db_config import get_config, load_configs
+from extensions import limiter
 from log_buffers import log_unpick, get_unpick_logs
 import notify
 
@@ -286,6 +287,74 @@ def _do_unpick_engine(engine, wh_id, order_number, item_number, run_id, qty=None
         return {"status": "ERROR", "message": msg}
 
 
+# ── Dry-run preview (SQLAlchemy) ─────────────────────────────────────────────
+
+def _dry_run_unpick_engine(engine, wh_id, order_number, item_number, qty=None):
+    """Read-only preview of what _do_unpick_engine would do — no writes."""
+    queries = load_agent_queries("unpick", DEFAULT_QUERIES)
+    try:
+        with engine.connect() as conn:
+            qty_row = execute_dynamic_query(conn, queries["find_picked_qty"],
+                                            {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+        if not qty_row or not qty_row[0] or float(qty_row[0]) <= 0:
+            return {"status": "WARNING", "message": "picked_quantity is 0 or NULL — nothing to unpick.",
+                    "preview": None, "steps": []}
+
+        actual = float(qty_row[0])
+        q = qty if qty is not None else actual
+        if qty and qty > actual:
+            return {"status": "WARNING", "message": f"unpick_qty ({qty}) exceeds picked_quantity ({actual}).",
+                    "preview": None, "steps": []}
+
+        with engine.connect() as conn:
+            pick_loc = _resolve_pick_loc_conn(conn, wh_id, order_number, item_number, queries)
+
+        steps = [
+            f"Reduce picked_quantity by {q} (current: {actual})",
+            f"Restore {q} unit(s) of {item_number} to pick location {pick_loc or '(unknown)'}",
+            "Update work queue status",
+        ]
+        return {
+            "status": "DRY_RUN",
+            "message": f"Would unpick {q} unit(s) of {item_number} from order {order_number} (WH {wh_id})",
+            "preview": {"wh_id": wh_id, "order_number": order_number, "item_number": item_number,
+                        "picked_quantity": actual, "unpick_quantity": q, "pick_location": pick_loc},
+            "steps": steps,
+        }
+    except Exception as exc:
+        return {"status": "ERROR", "message": f"Dry-run check failed: {exc}", "preview": None, "steps": []}
+
+
+@bp.route("/api/v0/unpick_agent/dry_run", methods=["POST"])
+@require_agent("unpick")
+@limiter.limit("10 per minute")
+def unpick_dry_run():
+    data         = request.get_json() or {}
+    db_config_id = data.get("db_config_id", "").strip()
+    records      = data.get("records", [])
+    if not db_config_id:
+        return jsonify({"type": "error", "error": "db_config_id is required"}), 400
+    if not records:
+        return jsonify({"type": "error", "error": "No records provided"}), 400
+    cfg = get_config(db_config_id)
+    if not cfg:
+        return jsonify({"type": "error", "error": "DB config not found"}), 404
+
+    engine  = get_engine(db_config_id, cfg)
+    results = []
+    for rec in records:
+        wh_id        = str(rec.get("wh_id", "")).strip()
+        order_number = str(rec.get("order_number", "")).strip()
+        item_number  = str(rec.get("item_number", "")).strip()
+        if not wh_id or not order_number or not item_number:
+            results.append({"wh_id": wh_id, "order_number": order_number, "item_number": item_number,
+                            "status": "WARNING", "message": "Missing required field(s).", "steps": []})
+            continue
+        res = _dry_run_unpick_engine(engine, wh_id, order_number, item_number)
+        results.append({"wh_id": wh_id, "order_number": order_number, "item_number": item_number, **res})
+    return jsonify({"type": "success", "results": results, "dry_run": True})
+
+
 # ── Shared unpick logic (pyodbc cursor) ──────────────────────────────────────
 
 def _resolve_pick_loc_cursor(cursor, wh_id, order_number, item_number, queries):
@@ -480,7 +549,6 @@ def auto_scan():
 
 
 # ── Manual full execute ───────────────────────────────────────────────────────
-from extensions import limiter
 
 @bp.route("/api/v0/unpick_agent/execute", methods=["POST"])
 @require_agent("unpick")
@@ -801,6 +869,33 @@ def partial_unpick():
             except Exception: pass
         from log_buffers import flush_logs_to_db
         flush_logs_to_db(run_id, "unpick")
+
+
+# ── Pick quantity lookup (I-04) ───────────────────────────────────────────────
+
+@bp.route("/api/v0/unpick_agent/pick_qty", methods=["GET"])
+@require_agent("unpick")
+def pick_qty():
+    db_config_id = request.args.get("db_config_id", "").strip()
+    wh_id        = request.args.get("wh_id",        "").strip()
+    order_number = request.args.get("order_number", "").strip()
+    item_number  = request.args.get("item_number",  "").strip()
+    if not db_config_id or not wh_id or not order_number or not item_number:
+        return jsonify({"type": "error", "error": "db_config_id, wh_id, order_number, item_number required"}), 400
+    cfg = get_config(db_config_id)
+    if not cfg:
+        return jsonify({"type": "error", "error": "DB config not found"}), 404
+    try:
+        conn    = get_engine(db_config_id, cfg).raw_connection()
+        queries = load_agent_queries("unpick", DEFAULT_QUERIES)
+        cursor  = conn.cursor()
+        row = execute_dynamic_query(cursor, queries["find_picked_qty"],
+                                    {"w": wh_id, "o": order_number, "i": item_number}).fetchone()
+        cursor.close(); conn.close()
+        qty = float(row[0]) if row and row[0] is not None else None
+        return jsonify({"type": "success", "picked_quantity": qty})
+    except Exception as e:
+        return jsonify({"type": "error", "error": str(e)}), 500
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────────

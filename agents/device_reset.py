@@ -10,6 +10,7 @@ from sqlalchemy import text as _text
 from auth import require_agent, admin_required, superadmin_required, log_audit_action, load_agent_queries, execute_dynamic_query
 from db import get_engine
 from db_config import get_config, load_configs
+from extensions import limiter
 from log_buffers import log_device_reset, get_device_reset_logs
 import notify
 
@@ -160,6 +161,84 @@ def _reset_device_engine(engine, device_id, run_id):
         return {"status": "ERROR", "message": msg}
 
 
+# ── Dry-run preview ──────────────────────────────────────────────────────────
+
+def _dry_run_device_reset_engine(engine, device_id):
+    """Read-only preview of what _reset_device_engine would do — no writes."""
+    queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
+    try:
+        with engine.connect() as conn:
+            emp_row = execute_dynamic_query(conn, queries["find_employee"], {"dev": device_id}).fetchone()
+        if not emp_row:
+            return {"status": "WARNING", "message": "Device not assigned — no reset needed.", "preview": None, "steps": []}
+        emp_id = emp_row[0]
+
+        with engine.connect() as conn:
+            loc_row = execute_dynamic_query(conn, queries["find_location"], {"emp": emp_id}).fetchone()
+        if not loc_row:
+            return {"status": "WARNING", "message": f"No fork location for employee {emp_id}.", "preview": None, "steps": []}
+        wh_id, fork_loc = loc_row[0], loc_row[1]
+
+        with engine.connect() as conn:
+            has_inv = bool(
+                execute_dynamic_query(conn, queries["check_stored_item"], {"l": fork_loc, "w": wh_id}).fetchone()
+                or execute_dynamic_query(conn, queries["check_hu_master"], {"l": fork_loc, "w": wh_id}).fetchone()
+            )
+
+        staging = None
+        if has_inv:
+            with engine.connect() as conn:
+                stage = execute_dynamic_query(conn, queries["find_staging"], {"wh": wh_id}).fetchone()
+            if not stage:
+                return {"status": "ERROR", "message": "No staging location available for inventory relocation.",
+                        "preview": {"employee": emp_id, "warehouse": wh_id, "fork_location": fork_loc, "has_inventory": True, "staging_location": None},
+                        "steps": []}
+            staging = stage[0]
+
+        steps = []
+        if has_inv:
+            steps.append(f"Relocate inventory from {fork_loc} to staging {staging}")
+        steps.append(f"Clear device {device_id} from employee {emp_id}")
+        steps.append(f"Reset fork location {fork_loc} (WH {wh_id}) to empty")
+
+        return {
+            "status": "DRY_RUN",
+            "message": f"Would reset device {device_id}: " + "; ".join(steps),
+            "preview": {"employee": emp_id, "warehouse": wh_id, "fork_location": fork_loc,
+                        "has_inventory": has_inv, "staging_location": staging},
+            "steps": steps,
+        }
+    except Exception as exc:
+        return {"status": "ERROR", "message": f"Dry-run check failed: {exc}", "preview": None, "steps": []}
+
+
+@bp.route("/api/v0/device_reset_agent/dry_run", methods=["POST"])
+@require_agent("device_reset")
+@limiter.limit("10 per minute")
+def device_dry_run():
+    data         = request.get_json() or {}
+    db_config_id = data.get("db_config_id", "").strip()
+    devices      = data.get("devices", [])
+    if not db_config_id:
+        return jsonify({"type": "error", "error": "db_config_id is required"}), 400
+    if not devices:
+        return jsonify({"type": "error", "error": "No devices provided"}), 400
+    cfg = get_config(db_config_id)
+    if not cfg:
+        return jsonify({"type": "error", "error": "DB config not found"}), 404
+
+    engine  = get_engine(db_config_id, cfg)
+    results = []
+    for dev in devices:
+        device_id = str(dev.get("device_id", "")).strip()
+        if not device_id:
+            results.append({"device_id": "", "status": "ERROR", "message": "Missing device_id", "steps": []})
+            continue
+        res = _dry_run_device_reset_engine(engine, device_id)
+        results.append({"device_id": device_id, **res})
+    return jsonify({"type": "success", "results": results, "dry_run": True})
+
+
 # ── Scheduler controls ────────────────────────────────────────────────────────
 
 @bp.route("/api/v0/device_reset_agent/scheduler_status", methods=["GET"])
@@ -207,7 +286,6 @@ def scheduler_interval():
 
 
 # ── Manual reset ──────────────────────────────────────────────────────────────
-from extensions import limiter
 
 @bp.route("/api/v0/device_reset_agent/manual_reset", methods=["POST"])
 @require_agent("device_reset")
@@ -217,6 +295,7 @@ def manual_reset():
     db_config_id = data.get("db_config_id", "").strip()
     device_id    = str(data.get("device_id", "")).strip()
     input_type   = str(data.get("input_type", "device")).strip().lower()
+    reason       = str(data.get("reason", "")).strip()
     if not db_config_id or not device_id:
         return jsonify({"type": "error", "error": "db_config_id and device_id required"}), 400
     cfg = get_config(db_config_id)
@@ -225,6 +304,8 @@ def manual_reset():
 
     run_id = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     log_device_reset("INFO", f"Manual reset started for {input_type} {device_id}.", device_id=device_id, run_id=run_id)
+    if reason:
+        log_device_reset("INFO", f"Reason: {reason}", device_id=device_id, run_id=run_id)
 
     conn = None
     try:
@@ -300,6 +381,15 @@ def manual_reset():
             steps.append(f"Staging location: {temp_loc}.")
             log_device_reset("INFO", f"Staging location {temp_loc} selected for inventory relocation.", device_id=device_id, run_id=run_id)
 
+        # Pre-execution state snapshot (I-02)
+        log_device_reset(
+            "INFO",
+            f"Pre-execution snapshot — employee:{emp_id} device:{resolved_device_id or 'none'} "
+            f"fork:{fork_loc}@{wh_id} inventory:{'present' if has_inv else 'none'}"
+            + (f" staging:{temp_loc}" if temp_loc else ""),
+            device_id=device_id, run_id=run_id,
+        )
+
         if has_inv and temp_loc:
             for tbl in ("t_stored_item", "t_hu_master", "t_hu_detail"):
                 cursor.execute(f"UPDATE {tbl} SET location_id = ? WHERE location_id = ? AND wh_id = ?",
@@ -325,7 +415,7 @@ def manual_reset():
             [{"status": "SUCCESS", "message": f"Device/Employee {device_id} reset"}],
             executed_by=current_user.display_name or current_user.username,
         )
-        log_audit_action(current_user.username, "EXECUTE_MANUAL_RESET", device_id, {"db_config_id": db_config_id, "status": "SUCCESS", "steps": steps})
+        log_audit_action(current_user.username, "EXECUTE_MANUAL_RESET", device_id, {"db_config_id": db_config_id, "status": "SUCCESS", "steps": steps, "reason": reason})
         return jsonify({"type": "success", "steps": steps})
 
     except Exception as exc:
@@ -406,6 +496,64 @@ def execute():
         notify.send_run_report(db_config_id, "Device Reset Agent", results, current_user.display_name or current_user.username)
         log_device_reset("INFO", f"Manual auto-scan execute completed. {len(results)} device(s) processed.", run_id=run_id)
         log_audit_action(current_user.username, "EXECUTE_AUTO_SCAN_RESET", db_config_id, {"devices_count": len(devices), "results": results})
+        return jsonify({"type": "success", "results": results, "run_id": run_id})
+    finally:
+        from log_buffers import flush_logs_to_db
+        flush_logs_to_db(run_id, "device_reset")
+
+
+# ── Batch manual reset (I-03) ────────────────────────────────────────────────
+
+@bp.route("/api/v0/device_reset_agent/batch_reset", methods=["POST"])
+@require_agent("device_reset")
+@limiter.limit("5 per minute")
+def batch_reset():
+    data         = request.get_json() or {}
+    db_config_id = data.get("db_config_id", "").strip()
+    entries      = data.get("entries", [])
+    input_type   = str(data.get("input_type", "device")).strip().lower()
+    reason       = str(data.get("reason", "")).strip()
+    if not db_config_id:
+        return jsonify({"type": "error", "error": "db_config_id is required"}), 400
+    if not entries:
+        return jsonify({"type": "error", "error": "No entries provided"}), 400
+    cfg = get_config(db_config_id)
+    if not cfg:
+        return jsonify({"type": "error", "error": "DB config not found"}), 404
+
+    run_id = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    if reason:
+        log_device_reset("INFO", f"Batch manual reset — reason: {reason}", run_id=run_id)
+    log_device_reset("INFO", f"Batch manual reset started: {len(entries)} entries (input_type={input_type}).", run_id=run_id)
+    results = []
+    try:
+        engine = get_engine(db_config_id, cfg)
+        queries = load_agent_queries("device_reset", DEFAULT_QUERIES)
+        for entry in entries:
+            device_id = str(entry).strip()
+            if not device_id:
+                continue
+            if input_type == "employee":
+                # Resolve employee → device
+                with engine.connect() as conn:
+                    dev_row = conn.execute(
+                        __import__("sqlalchemy").text(queries.get("find_device_by_employee", "SELECT device FROM t_employee WHERE id = :id")),
+                        {"id": device_id}
+                    ).fetchone()
+                actual_device_id = dev_row[0] if dev_row else None
+                if not actual_device_id:
+                    results.append({"entry": device_id, "status": "WARNING", "message": f"No device found for employee {device_id}"})
+                    continue
+            else:
+                actual_device_id = device_id
+            res = _reset_device_engine(engine, actual_device_id, run_id)
+            results.append({"entry": device_id, "device_id": actual_device_id, **res})
+
+        log_audit_action(current_user.username, "EXECUTE_BATCH_RESET", db_config_id,
+                         {"count": len(entries), "reason": reason, "results": results})
+        ok = sum(1 for r in results if r.get("status") == "SUCCESS")
+        log_device_reset("INFO", f"Batch reset complete: {ok}/{len(results)} successful.", run_id=run_id)
+        notify.send_run_report(db_config_id, "Device Reset Agent", results, current_user.display_name or current_user.username)
         return jsonify({"type": "success", "results": results, "run_id": run_id})
     finally:
         from log_buffers import flush_logs_to_db

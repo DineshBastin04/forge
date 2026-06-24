@@ -1,21 +1,27 @@
 function app() {
   return {
-    user: null, view: 'device-reset', sidebarOpen: false, toasts: [], dbConfigs: [],
+    user: null, view: 'device-reset', sidebarOpen: false, toasts: [], _toastTimers: {}, dbConfigs: [],
     loginForm: { username:'', password:'', error:'', loading:false },
     confirm: { show: false, msg: '', resolve: null },
     dark: true,
-    settings: { default_theme: 'dark', saving: false },
+    settings: { default_theme: 'dark', maintenance_mode: false, log_retention_days: 90, saving: false },
+    dash: { statsLoading: false, stats: null, runsLoading: false, recentRuns: [], carouselIdx: 0, donut: null },
+    health: { data: null, loading: false },
     dr: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
-          manualDbId:'', manualDeviceId:'', manualInputType:'device', manualLoading:false, manualResult:null,
+          manualDbId:'', manualDeviceId:'', manualInputType:'device', manualReason:'', manualLoading:false, manualResult:null,
+          batchEntries:[], batchFileName:'', batchLoading:false, batchResults:[],
           logs:[], logsLoading:false, logSearch:'', logLevel:'', logLive:false, logLiveTimer:null,
           logFromDate:'', logToDate:'',
-          scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[] },
+          scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[],
+          dryRunLoading:false, dryRunResults:[] },
     up: { tab:'scheduler', schedulerInfo:null, schedulerLoading:false, intervalInput:'',
           scanDbId:'', scanLoading:false, scanResults:[], execLoading:false, execResults:[],
           manualDbId:'', manualWhId:'', manualOrderNum:'', manualItemNum:'', manualLoading:false, manualResult:null,
           partialDbId:'', partialWhId:'', partialOrderNum:'', partialItemNum:'', partialQty:'',
+          partialPickedQty:null, partialPickQtyLoading:false,
           partialLoading:false, partialResult:null, logs:[], logsLoading:false, logSearch:'', logLevel:'',
-          logLive:false, logLiveTimer:null, logFromDate:'', logToDate:'' },
+          logLive:false, logLiveTimer:null, logFromDate:'', logToDate:'',
+          dryRunLoading:false, dryRunResults:[] },
     au: { list:[], loading:false, modal:false, editId:null, saving:false, userSearch:'',
           sortField:'', sortDir:'asc', formInitial:null,
           form:{username:'',display_name:'',password:'',role:'user',agent_perms:[],is_active:true},
@@ -45,7 +51,9 @@ function app() {
         const resSettings = await fetch('/api/v0/settings');
         if (resSettings.ok) {
           const s = await resSettings.json();
-          this.settings.default_theme = s.default_theme || 'dark';
+          this.settings.default_theme   = s.default_theme   || 'dark';
+          this.settings.maintenance_mode = !!s.maintenance_mode;
+          this.settings.log_retention_days = s.log_retention_days || 90;
         }
       } catch (e) {}
 
@@ -87,11 +95,14 @@ function app() {
       try {
         const d = await this.api('/api/v0/settings', {
           method: 'PATCH',
-          body: JSON.stringify({ default_theme: this.settings.default_theme })
+          body: JSON.stringify({
+            default_theme: this.settings.default_theme,
+            maintenance_mode: this.settings.maintenance_mode,
+            log_retention_days: parseInt(this.settings.log_retention_days, 10) || 90,
+          })
         });
         if (d) {
           this.toast('System settings saved', 'success');
-          // Apply the new theme immediately system-wide
           this.dark = this.settings.default_theme === 'dark';
           this.applyTheme();
         }
@@ -106,7 +117,9 @@ function app() {
         const resSettings = await fetch('/api/v0/settings');
         if (resSettings.ok) {
           const s = await resSettings.json();
-          this.settings.default_theme = s.default_theme || 'dark';
+          this.settings.default_theme    = s.default_theme    || 'dark';
+          this.settings.maintenance_mode = !!s.maintenance_mode;
+          this.settings.log_retention_days = s.log_retention_days || 90;
         }
       } catch (e) {}
     },
@@ -130,7 +143,7 @@ function app() {
       this.view=v; this.sidebarOpen=false; this._lvd();
     },
     _lvd() {
-      if (this.view==='dashboard') { this.drLoadScheduler(); this.upLoadScheduler(); }
+      if (this.view==='dashboard') { this.drLoadScheduler(); this.upLoadScheduler(); this.dashLoadStats(); this.dashLoadRecentRuns(); }
       else if (this.view==='device-reset') { this.drLoadScheduler(); if (this.dr.scanResults.length > 0 && this.dr.tab === 'scheduler') this.dr.tab = 'scan'; }
       else if (this.view==='unpick') { this.upLoadScheduler(); if (this.up.scanResults.length > 0 && this.up.tab === 'scheduler') this.up.tab = 'scan'; }
       else if (this.view==='users') this.auLoad();
@@ -138,7 +151,7 @@ function app() {
       else if (this.view==='audit-logs') this.auLoadAuditLogs();
       else if (this.view==='my-history') this.myHistoryLoad();
       else if (this.view==='agent-workflows') this.awLoad();
-      else if (this.view==='system-settings') this.loadSystemSettings();
+      else if (this.view==='system-settings') { this.loadSystemSettings(); this.loadHealth(); }
     },
     async api(path, opts={}) {
       const getCookie = (name) => {
@@ -160,12 +173,22 @@ function app() {
     },
     toast(msg, type='info') {
       const id = Date.now() + Math.random();
-      let timerId = null;
-      const dismiss = () => { this.toasts = this.toasts.filter(t => t.id !== id); };
-      const pause = () => clearTimeout(timerId);
-      const resume = () => { timerId = setTimeout(dismiss, 5000); };
-      this.toasts.push({ id, msg, type, pause, resume });
-      resume();
+      this.toasts.push({ id, msg, type });
+      this._resumeToast(id);
+    },
+    _pauseToast(id) {
+      if (this._toastTimers[id]) { clearTimeout(this._toastTimers[id]); delete this._toastTimers[id]; }
+    },
+    _resumeToast(id) {
+      this._pauseToast(id);
+      this._toastTimers[id] = setTimeout(() => {
+        this.toasts = this.toasts.filter(t => t.id !== id);
+        delete this._toastTimers[id];
+      }, 3000);
+    },
+    _dismissToast(id) {
+      this._pauseToast(id);
+      this.toasts = this.toasts.filter(t => t.id !== id);
     },
     confirmDialog(msg) { return new Promise(resolve => { this.confirm = { show: true, msg, resolve }; }); },
     confirmOk()     { if (this.confirm.resolve) this.confirm.resolve(true);  this.confirm = { show: false, msg: '', resolve: null }; },
@@ -202,7 +225,7 @@ function app() {
     async drLoadScheduler(){this.dr.schedulerLoading=true;try{this.dr.schedulerInfo=await this.api('/api/v0/device_reset_agent/scheduler_status');}catch(e){this.dr.schedulerInfo=null;}finally{this.dr.schedulerLoading=false;}},
     async drToggle(){try{await this.api('/api/v0/device_reset_agent/scheduler_toggle',{method:'POST'});await this.drLoadScheduler();this.toast('Scheduler updated','success');}catch(e){this.toast(e.message,'error');}},
     async drSetInterval(){const h=parseFloat(this.dr.intervalInput);if(!h||h<.25||h>168){this.toast('Interval must be 0.25–168 hours','error');return;}try{await this.api('/api/v0/device_reset_agent/scheduler_interval',{method:'POST',body:JSON.stringify({hours:h})});this.dr.intervalInput='';await this.drLoadScheduler();this.toast(`Interval set to ${h}h`,'success');}catch(e){this.toast(e.message,'error');}},
-    async drManualReset(){const typeLabel=this.dr.manualInputType==='device'?'Device':'Employee';if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast(`Select DB and enter ${typeLabel} ID`,'error');return;}if(!await this.confirmDialog(`Reset ${this.dr.manualInputType==='device'?'device':'employee'} "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim(),input_type:this.dr.manualInputType})});if(d.type==='warning'){this.dr.manualResult={ok:false,type:'warning',message:d.message};this.toast(d.message,'warning');}else{this.dr.manualResult={ok:true,type:'success',steps:d.steps||[]};this.toast(`${typeLabel} reset successful`,'success');}}catch(e){this.dr.manualResult={ok:false,type:'error',message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
+    async drManualReset(){const typeLabel=this.dr.manualInputType==='device'?'Device':'Employee';if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast(`Select DB and enter ${typeLabel} ID`,'error');return;}if(!await this.confirmDialog(`Reset ${this.dr.manualInputType==='device'?'device':'employee'} "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim(),input_type:this.dr.manualInputType,reason:this.dr.manualReason})});if(d.type==='warning'){this.dr.manualResult={ok:false,type:'warning',message:d.message};this.toast(d.message,'warning');}else{this.dr.manualResult={ok:true,type:'success',steps:d.steps||[]};this.toast(`${typeLabel} reset successful`,'success');}}catch(e){this.dr.manualResult={ok:false,type:'error',message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
     async drLoadLogs(){this.dr.logsLoading=true;try{const d=await this.api('/api/v0/device_reset_logs');this.dr.logs=d?d.logs:[];}catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}},
     drDownloadLogs(fmt) {
       let url = `/api/v0/device_reset_logs/download?format=${fmt}`;
@@ -531,7 +554,7 @@ function app() {
       }
     },
     async dbcDelete(id){if(!await this.confirmDialog(`Delete database config "${id}"? This cannot be undone.`))return;try{await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}`,{method:'DELETE'});this.toast('Config deleted','success');await this.dbcLoad();await this.loadDbConfigs();}catch(e){this.toast(e.message,'error');}},
-    async dbcTestConn(id){this.dbc.testConnLoading=true;this.dbc.testConnResult=null;try{const d=await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}/test_connection`,{method:'POST'});this.dbc.testConnResult={ok:true,msg:d?.message||'Connection successful'};this.toast('Connection successful','success');}catch(e){this.dbc.testConnResult={ok:false,msg:e.message};this.toast(e.message,'error');}finally{this.dbc.testConnLoading=false;}},
+    async dbcTestConn(id){this.dbc.testConnLoading=true;this.dbc.testConnResult=null;clearTimeout(this.dbc._testConnTimer);try{const d=await this.api(`/api/v0/admin/db_configs/${encodeURIComponent(id)}/test_connection`,{method:'POST'});this.dbc.testConnResult={ok:true,msg:d?.message||'Connection successful'};this.toast('Connection successful','success');}catch(e){this.dbc.testConnResult={ok:false,msg:e.message};this.toast(e.message,'error');}finally{this.dbc.testConnLoading=false;this.dbc._testConnTimer=setTimeout(()=>{this.dbc.testConnResult=null;},5000);}},
     async dbcTestFormConn(target='primary'){
       const isLog = target === 'log';
       if(isLog){
@@ -632,5 +655,128 @@ function app() {
     roleBadge(r){return({superadmin:'bg-purple-100 text-purple-700',admin:'bg-blue-100 text-blue-700',user:'bg-slate-100 text-slate-600'})[r]||'bg-slate-100 text-slate-600';},
     userInitials(u){if(!u)return'?';const n=u.display_name||u.username||'';return n.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()||'?';},
     fmtDate(iso){if(!iso)return'—';try{return new Date(iso).toLocaleString();}catch(e){return iso;}},
+    userTZ(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone;}catch(e){return'UTC';}},
+    fmtDateTZ(iso){if(!iso)return'—';try{return new Date(iso).toLocaleString()+' ('+this.userTZ()+')';}catch(e){return iso;}},
+
+    // ── Dashboard stats (C-01, C-02) ──────────────────────────────────────────
+    async dashLoadStats(){
+      this.dash.statsLoading=true;
+      try{
+        const d=await this.api('/api/v0/dashboard/stats');
+        this.dash.stats=d||null;
+        if(d) this.dash.donut=this._computeDonut(d);
+      }catch(e){this.dash.stats=null;this.dash.donut=null;}
+      finally{this.dash.statsLoading=false;}
+    },
+    _computeDonut(stats){
+      const C=301.59; // 2π×48
+      const result={};
+      for(const key of ['device_reset','unpick']){
+        const s=stats[key]||{};
+        const suc=s.success_runs_week||0,wrn=s.warning_runs_week||0,err=s.error_runs_week||0;
+        const total=suc+wrn+err;
+        if(!total){result[key]=null;continue;}
+        let off=0;
+        result[key]={total,segs:[{c:'#10b981',v:suc},{c:'#f59e0b',v:wrn},{c:'#ef4444',v:err}].map(seg=>{
+          const len=(seg.v/total)*C;
+          const r={c:seg.c,da:`${len.toFixed(2)} ${C}`,do:(-off).toFixed(2)};
+          off+=len; return r;
+        })};
+      }
+      return result;
+    },
+    async dashLoadRecentRuns(){
+      this.dash.runsLoading=true;
+      try{const d=await this.api('/api/v0/dashboard/recent_runs');this.dash.recentRuns=d?.runs||[];}
+      catch(e){this.dash.recentRuns=[];}
+      finally{this.dash.runsLoading=false;}
+    },
+
+    // ── Health data (L-02) ────────────────────────────────────────────────────
+    async loadHealth(){
+      this.health.loading=true;
+      try{this.health.data=await this.api('/api/v0/health');}
+      catch(e){this.health.data=null;}
+      finally{this.health.loading=false;}
+    },
+
+    // ── Log purge (L-01) ─────────────────────────────────────────────────────
+    async purgeLogs(){
+      const days=parseInt(this.settings.log_retention_days,10)||90;
+      if(!await this.confirmDialog(`Delete all job logs older than ${days} days? This cannot be undone.`))return;
+      try{
+        const d=await this.api('/api/v0/admin/logs/purge',{method:'POST',body:JSON.stringify({days})});
+        this.toast(`Purged ${d.deleted} log entries older than ${days} days`,'success');
+      }catch(e){this.toast(e.message,'error');}
+    },
+
+    // ── Batch manual reset (I-03) ─────────────────────────────────────────────
+    async drBatchReset(){
+      const entries=this.dr.batchEntries;
+      if(!this.dr.manualDbId){this.toast('Select a database','error');return;}
+      if(!entries.length){this.toast('Upload a CSV file with at least one ID','error');return;}
+      if(!await this.confirmDialog(`Run manual reset on ${entries.length} ${this.dr.manualInputType}(s)? This will modify warehouse records.`))return;
+      this.dr.batchLoading=true;this.dr.batchResults=[];
+      try{
+        const d=await this.api('/api/v0/device_reset_agent/batch_reset',{method:'POST',body:JSON.stringify({
+          db_config_id:this.dr.manualDbId,entries,input_type:this.dr.manualInputType,reason:this.dr.manualReason
+        })});
+        this.dr.batchResults=d?.results||[];
+        const ok=this.dr.batchResults.filter(r=>r.status==='SUCCESS').length;
+        this.toast(`${ok}/${entries.length} reset successfully`,ok===entries.length?'success':'warning');
+      }catch(e){this.toast(e.message,'error');}
+      finally{this.dr.batchLoading=false;}
+    },
+
+    // ── Dry run (D-01) ───────────────────────────────────────────────────────
+    async drDryRun(){
+      const sel=this.dr.scanResults.filter(r=>r._selected);
+      if(!this.dr.scanDbId||!sel.length){this.toast('Select a database and at least one device','error');return;}
+      this.dr.dryRunLoading=true;this.dr.dryRunResults=[];
+      try{
+        const d=await this.api('/api/v0/device_reset_agent/dry_run',{method:'POST',body:JSON.stringify({db_config_id:this.dr.scanDbId,devices:sel})});
+        this.dr.dryRunResults=d?.results||[];
+        this.toast(`Dry run complete — ${sel.length} device(s) previewed`,'success');
+      }catch(e){this.toast(e.message,'error');}
+      finally{this.dr.dryRunLoading=false;}
+    },
+    async upDryRun(){
+      const sel=this.up.scanResults.filter(r=>r._selected);
+      if(!this.up.scanDbId||!sel.length){this.toast('Select a database and at least one record','error');return;}
+      this.up.dryRunLoading=true;this.up.dryRunResults=[];
+      try{
+        const d=await this.api('/api/v0/unpick_agent/dry_run',{method:'POST',body:JSON.stringify({db_config_id:this.up.scanDbId,records:sel})});
+        this.up.dryRunResults=d?.results||[];
+        this.toast(`Dry run complete — ${sel.length} record(s) previewed`,'success');
+      }catch(e){this.toast(e.message,'error');}
+      finally{this.up.dryRunLoading=false;}
+    },
+
+    // ── CSV batch import (I-03) ───────────────────────────────────────────────
+    drParseCsvFile(event){
+      const file=event.target.files[0];
+      if(!file){this.dr.batchEntries=[];this.dr.batchFileName='';return;}
+      this.dr.batchFileName=file.name;
+      const reader=new FileReader();
+      reader.onload=e=>{
+        const entries=e.target.result.split('\n')
+          .map(l=>l.split(',')[0].trim().replace(/^"|"$/g,''))
+          .filter(Boolean);
+        this.dr.batchEntries=entries;
+      };
+      reader.readAsText(file);
+    },
+
+    // ── Partial unpick pick qty (I-04) ────────────────────────────────────────
+    async upFetchPickQty(){
+      const{partialDbId:db,partialWhId:w,partialOrderNum:o,partialItemNum:i}=this.up;
+      if(!db||!w||!o||!i){this.up.partialPickedQty=null;return;}
+      this.up.partialPickQtyLoading=true;
+      try{
+        const d=await this.api(`/api/v0/unpick_agent/pick_qty?db_config_id=${encodeURIComponent(db)}&wh_id=${encodeURIComponent(w)}&order_number=${encodeURIComponent(o)}&item_number=${encodeURIComponent(i)}`);
+        this.up.partialPickedQty=d?.picked_quantity??null;
+      }catch(e){this.up.partialPickedQty=null;}
+      finally{this.up.partialPickQtyLoading=false;}
+    },
   }
 }

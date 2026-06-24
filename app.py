@@ -76,6 +76,123 @@ def create_app() -> Flask:
     for blueprint in (auth_bp, users_bp, db_config_bp, dr_bp, unpick_bp):
         app.register_blueprint(blueprint)
 
+    # ── Maintenance mode guard ────────────────────────────────────────────────
+    _EXEC_ROUTES = {
+        "/api/v0/device_reset_agent/manual_reset",
+        "/api/v0/device_reset_agent/execute",
+        "/api/v0/device_reset_agent/batch_reset",
+        "/api/v0/unpick_agent/manual_unpick",
+        "/api/v0/unpick_agent/partial_unpick",
+        "/api/v0/unpick_agent/execute",
+    }
+
+    @app.before_request
+    def check_maintenance_mode():
+        from flask import request as req
+        if req.method in ("GET", "HEAD", "OPTIONS"):
+            return
+        if req.path.startswith("/api/v0/auth/") or req.path == "/api/v0/settings":
+            return
+        if req.path not in _EXEC_ROUTES:
+            return
+        from db_config import load_settings
+        if not load_settings().get("maintenance_mode", False):
+            return
+        from flask_login import current_user
+        if current_user.is_authenticated and getattr(current_user, "role", "") == "superadmin":
+            return
+        return jsonify({"type": "error", "error": "System is in maintenance mode. Agent executions are temporarily suspended."}), 503
+
+    # ── Dashboard stats ───────────────────────────────────────────────────────
+    @app.route("/api/v0/dashboard/stats")
+    @login_required
+    def dashboard_stats():
+        from auth import _get_conn
+        from datetime import datetime, timedelta
+        today    = datetime.utcnow().strftime("%Y-%m-%d")
+        week_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        result = {
+            "device_reset": {"runs_today": 0, "errors_week": 0, "records_week": 0,
+                             "success_runs_week": 0, "warning_runs_week": 0, "error_runs_week": 0},
+            "unpick":        {"runs_today": 0, "errors_week": 0, "records_week": 0,
+                             "success_runs_week": 0, "warning_runs_week": 0, "error_runs_week": 0},
+        }
+        try:
+            conn = _get_conn()
+            cur = conn.execute(
+                "SELECT log_type, COUNT(DISTINCT run_id) FROM job_logs WHERE LEFT(timestamp,10)=? GROUP BY log_type",
+                today)
+            for r in cur.fetchall():
+                if r[0] in result: result[r[0]]["runs_today"] = r[1]
+            cur = conn.execute(
+                "SELECT log_type, COUNT(*) FROM job_logs WHERE level='ERROR' AND LEFT(timestamp,10)>=? GROUP BY log_type",
+                week_ago)
+            for r in cur.fetchall():
+                if r[0] in result: result[r[0]]["errors_week"] = r[1]
+            cur = conn.execute(
+                "SELECT log_type, COUNT(DISTINCT CASE WHEN log_type='device_reset' THEN device_id ELSE order_number END) "
+                "FROM job_logs WHERE level='INFO' AND message LIKE '%successfully%' AND LEFT(timestamp,10)>=? GROUP BY log_type",
+                week_ago)
+            for r in cur.fetchall():
+                if r[0] in result: result[r[0]]["records_week"] = r[1]
+            cur = conn.execute("""
+                SELECT log_type,
+                    SUM(CASE WHEN max_level='ERROR'   THEN 1 ELSE 0 END) AS error_runs,
+                    SUM(CASE WHEN max_level='WARNING' THEN 1 ELSE 0 END) AS warning_runs,
+                    SUM(CASE WHEN max_level='INFO'    THEN 1 ELSE 0 END) AS success_runs
+                FROM (
+                    SELECT log_type, run_id,
+                        CASE
+                            WHEN SUM(CASE WHEN level='ERROR'   THEN 1 ELSE 0 END)>0 THEN 'ERROR'
+                            WHEN SUM(CASE WHEN level='WARNING' THEN 1 ELSE 0 END)>0 THEN 'WARNING'
+                            ELSE 'INFO'
+                        END AS max_level
+                    FROM job_logs
+                    WHERE LEFT(timestamp,10)>=?
+                    GROUP BY log_type, run_id
+                ) sub
+                GROUP BY log_type
+            """, week_ago)
+            for r in cur.fetchall():
+                if r[0] in result:
+                    result[r[0]]["error_runs_week"]   = r[1] or 0
+                    result[r[0]]["warning_runs_week"] = r[2] or 0
+                    result[r[0]]["success_runs_week"] = r[3] or 0
+            conn.close()
+        except Exception as e:
+            logger.warning("dashboard_stats error: %s", e)
+        return jsonify(result)
+
+    @app.route("/api/v0/dashboard/recent_runs")
+    @login_required
+    def dashboard_recent_runs():
+        from auth import _get_conn
+        runs = []
+        try:
+            conn = _get_conn()
+            cur = conn.execute("""
+                SELECT TOP 10 run_id, log_type,
+                    COUNT(DISTINCT CASE WHEN log_type='device_reset' THEN device_id ELSE order_number END) AS records,
+                    SUM(CASE WHEN level='ERROR'   THEN 1 ELSE 0 END) AS errors,
+                    SUM(CASE WHEN level='WARNING' THEN 1 ELSE 0 END) AS warnings,
+                    MIN(timestamp) AS started_at
+                FROM job_logs
+                GROUP BY run_id, log_type
+                ORDER BY MIN(timestamp) DESC
+            """)
+            for row in cur.fetchall():
+                rid, lt, rec, err, wrn, sa = row
+                runs.append({
+                    "run_id": rid, "log_type": lt,
+                    "records": rec or 0, "errors": err or 0, "warnings": wrn or 0,
+                    "status": "ERROR" if (err or 0) > 0 else ("WARNING" if (wrn or 0) > 0 else "SUCCESS"),
+                    "started_at": sa,
+                })
+            conn.close()
+        except Exception as e:
+            logger.warning("dashboard_recent_runs error: %s", e)
+        return jsonify({"runs": runs})
+
     # ── Health check ──────────────────────────────────────────────────────────
     @app.route("/api/v0/health")
     @login_required

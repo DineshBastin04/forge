@@ -6,13 +6,13 @@
       <!-- Icon with Blue T and Golden Swoosh -->
       <div class="w-9 h-9 flex items-center justify-center flex-shrink-0">
         <svg viewBox="0 0 50 50" class="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <text x="14" y="36" font-family="'Inter', 'sans-serif'" font-weight="900" font-size="34" fill="#3b82f6">T</text>
+          <text x="14" y="36" font-family="'Plus Jakarta Sans','system-ui','sans-serif'" font-weight="900" font-size="34" fill="#3b82f6">T</text>
           <path d="M 6 36 C 20 44, 32 38, 44 24 C 32 33, 20 36, 6 36 Z" fill="#e5a913" />
         </svg>
       </div>
       <div>
         <div class="text-slate-800 dark:text-white font-semibold text-sm">Tychons Wi-Agents</div>
-        <div class="text-slate-400 dark:text-slate-500 text-xs">Automation Platform</div>
+        <div class="text-slate-400 dark:text-slate-500 text-xs">Warehouse Ops</div>
       </div>
     </div>
 
@@ -28,7 +28,7 @@
         <template x-for="agent in registeredAgents" :key="agent.id">
           <template x-if="hasAgentPerm(agent.id) && ['device_reset', 'unpick'].includes(agent.id)">
             <button class="sidebar-link" :class="view===(agent.id==='device_reset'?'device-reset':agent.id)&&'active'" @click="nav(agent.id==='device_reset'?'device-reset':agent.id)">
-              <svg x-show="agent.id==='device_reset'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <svg x-show="agent.id==='device_reset'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
               <svg x-show="agent.id==='unpick'" class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               <span class="flex-1" x-text="agent.name"></span>
               <template x-if="agent.id==='device_reset'">

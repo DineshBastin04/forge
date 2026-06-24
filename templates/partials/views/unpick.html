@@ -12,9 +12,9 @@
           <div x-show="up.schedulerLoading" class="text-slate-500 text-sm p-2">Loading…</div>
           <div x-show="!up.schedulerLoading">
             <div x-show="up.schedulerInfo" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Status</div><span class="badge text-sm py-1" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-yellow-100 text-yellow-700'" x-text="up.schedulerInfo&&(up.schedulerInfo.running&&!up.schedulerInfo.paused?'Running':'Paused')"></span></div>
-              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Interval</div><div class="text-2xl font-bold text-slate-800 dark:text-slate-100" x-text="up.schedulerInfo&&up.schedulerInfo.interval_hours?up.schedulerInfo.interval_hours+'h':'—'"></div></div>
-              <div class="card"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Next Run</div><div class="text-sm text-slate-700" x-text="up.schedulerInfo&&up.schedulerInfo.next_run?fmtDate(up.schedulerInfo.next_run):'—'"></div></div>
+              <div class="card"><div class="text-xs font-medium text-slate-500 mb-2">Status</div><span class="badge text-sm py-1" :class="up.schedulerInfo&&up.schedulerInfo.running&&!up.schedulerInfo.paused?'bg-emerald-100 text-emerald-700':'bg-yellow-100 text-yellow-700'" x-text="up.schedulerInfo&&(up.schedulerInfo.running&&!up.schedulerInfo.paused?'Running':'Paused')"></span></div>
+              <div class="card"><div class="text-xs font-medium text-slate-500 mb-2">Interval</div><div class="text-2xl font-bold text-slate-800 dark:text-slate-100" x-text="up.schedulerInfo&&up.schedulerInfo.interval_hours?up.schedulerInfo.interval_hours+'h':'—'"></div></div>
+              <div class="card"><div class="text-xs font-medium text-slate-500 mb-2">Next Run</div><div class="text-sm text-slate-700" x-text="up.schedulerInfo&&up.schedulerInfo.next_run?fmtDateTZ(up.schedulerInfo.next_run):'—'"></div></div>
             </div>
             <div x-show="!up.schedulerInfo" class="card text-slate-500 text-sm mb-4">Scheduler not available — agents run on demand.</div>
             <template x-if="isAdmin()&&up.schedulerInfo">
@@ -37,7 +37,11 @@
                 <svg x-show="up.scanLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 <span x-text="up.scanLoading?'Scanning…':'Scan Now'"></span>
               </button>
-              <button x-show="up.scanResults.length>0" class="btn-primary w-full sm:w-auto justify-center" @click="upExecuteSelected()" :disabled="up.execLoading||upSelectedCount()===0" style="background:#059669">
+              <button x-show="up.scanResults.length>0" class="btn-secondary w-full sm:w-auto justify-center" @click="upDryRun()" :disabled="up.dryRunLoading||up.execLoading||upSelectedCount()===0">
+                <svg x-show="up.dryRunLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="up.dryRunLoading?'Previewing…':'Dry Run ('+upSelectedCount()+')'"></span>
+              </button>
+              <button x-show="up.scanResults.length>0" class="btn-primary w-full sm:w-auto justify-center" @click="upExecuteSelected()" :disabled="up.execLoading||up.dryRunLoading||upSelectedCount()===0" style="background:#059669">
                 <svg x-show="up.execLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 <span x-text="up.execLoading?'Executing…':'Execute Selected ('+upSelectedCount()+')'"></span>
               </button>
@@ -49,19 +53,49 @@
               <tbody><template x-for="(r,i) in up.scanResults" :key="i"><tr><td class="td"><input type="checkbox" x-model="r._selected" class="rounded"></td><td class="td font-mono text-sm" x-text="r.order_number"></td><td class="td" x-text="r.wh_id"></td><td class="td font-mono text-sm" x-text="r.item_number"></td></tr></template></tbody>
             </table></div>
           </div>
+          <!-- Dry-run preview results (D-01) -->
+          <div x-show="up.dryRunResults.length>0" class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-xs font-medium text-slate-500">Dry run preview — no changes made</div>
+              <button class="btn-secondary btn-sm text-xs" @click="up.dryRunResults=[]">Clear</button>
+            </div>
+            <div class="bg-white rounded-xl border border-blue-200 overflow-hidden">
+              <div class="overflow-x-auto"><table class="min-w-full">
+                <thead><tr><th class="th">Order</th><th class="th">Item</th><th class="th">Status</th><th class="th">What would happen</th></tr></thead>
+                <tbody>
+                  <template x-for="(r,i) in up.dryRunResults" :key="i">
+                    <tr>
+                      <td class="td font-mono text-sm" x-text="r.order_number"></td>
+                      <td class="td font-mono text-sm" x-text="r.item_number"></td>
+                      <td class="td"><span class="badge" :class="r.status==='DRY_RUN'?'bg-blue-100 text-blue-700':r.status==='WARNING'?'bg-amber-100 text-amber-700':'bg-red-100 text-red-700'" x-text="r.status==='DRY_RUN'?'Preview':r.status"></span></td>
+                      <td class="td text-sm">
+                        <template x-if="r.steps&&r.steps.length">
+                          <ul class="space-y-0.5 list-none">
+                            <template x-for="(s,j) in r.steps" :key="j"><li class="text-slate-600 flex gap-1"><span class="text-blue-400">→</span><span x-text="s"></span></li></template>
+                          </ul>
+                        </template>
+                        <template x-if="!r.steps||!r.steps.length"><span x-text="r.message"></span></template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table></div>
+            </div>
+          </div>
+
           <div x-show="up.execResults.length>0">
             <div class="flex gap-3 mb-3">
               <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
                 <span class="text-2xl font-bold text-emerald-700" x-text="up.execResults.filter(r=>r.status==='SUCCESS').length"></span>
-                <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Success</span>
+                <span class="text-xs font-semibold text-emerald-600">Completed</span>
               </div>
               <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                 <span class="text-2xl font-bold text-amber-700" x-text="up.execResults.filter(r=>r.status==='WARNING').length"></span>
-                <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Warning</span>
+                <span class="text-xs font-semibold text-amber-600">Warnings</span>
               </div>
               <div class="flex-1 flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
                 <span class="text-2xl font-bold text-red-700" x-text="up.execResults.filter(r=>r.status==='ERROR').length"></span>
-                <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+                <span class="text-xs font-semibold text-red-600">Errors</span>
               </div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -109,14 +143,33 @@
           <div class="card">
             <h3 class="font-semibold text-slate-800 mb-4">Partial Unpick</h3>
             <div class="space-y-4">
-              <div><label class="label">Database</label><select x-model="up.partialDbId" class="select"><option value="">Select database…</option><template x-for="db in dbConfigs" :key="db.id"><option :value="db.id" x-text="db.name||db.id"></option></template></select></div>
+              <div><label class="label">Database</label><select x-model="up.partialDbId" class="select" @change="upFetchPickQty()"><option value="">Select database…</option><template x-for="db in dbConfigs" :key="db.id"><option :value="db.id" x-text="db.name||db.id"></option></template></select></div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="label">WH ID</label><input x-model="up.partialWhId" class="input" placeholder="01"></div>
-                <div><label class="label">Order Number</label><input x-model="up.partialOrderNum" class="input" placeholder="ORD12345"></div>
+                <div><label class="label">WH ID</label><input x-model="up.partialWhId" class="input" placeholder="01" @change="upFetchPickQty()"></div>
+                <div><label class="label">Order Number</label><input x-model="up.partialOrderNum" class="input" placeholder="ORD12345" @change="upFetchPickQty()"></div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div><label class="label">Item Number</label><input x-model="up.partialItemNum" class="input" placeholder="ITEM001"></div>
-                <div><label class="label">Quantity</label><input x-model="up.partialQty" type="number" step="1" min="1" class="input" placeholder="1"></div>
+                <div>
+                  <label class="label">Item Number</label>
+                  <input x-model="up.partialItemNum" class="input" placeholder="ITEM001"
+                    @change="upFetchPickQty()">
+                </div>
+                <div>
+                  <label class="label">Quantity to Unpick</label>
+                  <input x-model="up.partialQty" type="number" step="1" min="1" class="input" placeholder="1">
+                </div>
+              </div>
+              <!-- Current pick qty display (I-04) -->
+              <div x-show="up.partialPickQtyLoading||up.partialPickedQty!==null" class="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <svg x-show="up.partialPickQtyLoading" class="w-4 h-4 animate-spin text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-show="up.partialPickQtyLoading" class="text-sm text-slate-500">Fetching current quantity…</span>
+                <template x-if="!up.partialPickQtyLoading&&up.partialPickedQty!==null">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">Currently picked:</span>
+                    <span class="font-bold text-slate-800 dark:text-slate-100" x-text="up.partialPickedQty"></span>
+                    <span class="text-xs text-slate-500">units on record</span>
+                  </div>
+                </template>
               </div>
               <button class="btn-primary w-full sm:w-auto justify-center" @click="upPartialUnpick()" :disabled="up.partialLoading">
                 <svg x-show="up.partialLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>

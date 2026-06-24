@@ -373,15 +373,17 @@ def _settings_path():
     return os.path.join(data_dir, "system_settings.json")
 
 
+_SETTINGS_DEFAULTS = {"default_theme": "dark", "maintenance_mode": False, "log_retention_days": 90}
+
 def load_settings():
     path = _settings_path()
     if not os.path.exists(path):
-        return {"default_theme": "dark"}
+        return dict(_SETTINGS_DEFAULTS)
     try:
         with open(path, "r") as f:
-            return json.load(f)
+            return {**_SETTINGS_DEFAULTS, **json.load(f)}
     except Exception:
-        return {"default_theme": "dark"}
+        return dict(_SETTINGS_DEFAULTS)
 
 
 def save_settings(settings):
@@ -411,6 +413,18 @@ def update_settings():
             return jsonify({"type": "error", "error": "Invalid theme value"}), 400
         settings["default_theme"] = theme
 
+    if "maintenance_mode" in data:
+        settings["maintenance_mode"] = bool(data["maintenance_mode"])
+
+    if "log_retention_days" in data:
+        try:
+            days = int(data["log_retention_days"])
+            if not (1 <= days <= 3650):
+                raise ValueError()
+            settings["log_retention_days"] = days
+        except (TypeError, ValueError):
+            return jsonify({"type": "error", "error": "log_retention_days must be 1–3650"}), 400
+
     save_settings(settings)
 
     from auth import log_audit_action
@@ -423,4 +437,42 @@ def update_settings():
     )
 
     return jsonify(settings)
+
+
+# ── Log retention purge ───────────────────────────────────────────────────────
+
+@bp.route("/api/v0/admin/logs/purge", methods=["POST"])
+def purge_logs():
+    from auth import admin_required_check, _get_conn, log_audit_action
+    from flask_login import current_user
+    err = admin_required_check()
+    if err: return err
+
+    settings = load_settings()
+    days = settings.get("log_retention_days", 90)
+
+    data = request.get_json() or {}
+    if "days" in data:
+        try:
+            days = int(data["days"])
+            if not (1 <= days <= 3650):
+                raise ValueError()
+        except (TypeError, ValueError):
+            return jsonify({"type": "error", "error": "days must be 1–3650"}), 400
+
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    try:
+        conn = _get_conn()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM job_logs WHERE timestamp < ?", cutoff)
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close(); conn.close()
+        log_audit_action(current_user.username, "PURGE_JOB_LOGS", "job_logs",
+                         {"days": days, "deleted": deleted, "cutoff": cutoff})
+        return jsonify({"type": "success", "deleted": deleted, "cutoff": cutoff})
+    except Exception as e:
+        return jsonify({"type": "error", "error": str(e)}), 500
 
