@@ -1,3 +1,183 @@
+# import logging
+# from concurrent.futures import ThreadPoolExecutor
+
+# import requests
+
+# logger = logging.getLogger(__name__)
+# _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="notify")
+
+
+# def _post(url: str, payload: dict) -> bool:
+#     try:
+#         r = requests.post(url, json=payload, timeout=10)
+#         r.raise_for_status()
+#         return True
+#     except Exception as e:
+#         logger.warning("Notification send failed (%s): %s", url[:40], e)
+#         return False
+
+
+# def _result_description(result: dict) -> str:
+#     status = str(result.get("status", "UNKNOWN")).upper()
+#     pieces = []
+#     if result.get("device_id"):
+#         pieces.append(f"Device {result['device_id']}")
+#     if result.get("employee_id"):
+#         pieces.append(f"Employee {result['employee_id']}")
+#     if result.get("order_number"):
+#         if result.get("item_number"):
+#             pieces.append(f"Order {result['order_number']} / Item {result['item_number']}")
+#         else:
+#             pieces.append(f"Order {result['order_number']}")
+#     elif result.get("item_number"):
+#         pieces.append(f"Item {result['item_number']}")
+#     if result.get("wh_id"):
+#         pieces.append(f"WH {result['wh_id']}")
+#     message = str(result.get("message", "")).strip()
+#     target = " | ".join(pieces) if pieces else ""
+#     if target and message:
+#         detail = f"{target} — {message}"
+#     else:
+#         detail = target or message or "No additional details available."
+#     return f"{status}: {detail}"
+
+
+# def _run_summary(agent: str, db_name: str, executed_by: str, results: list) -> dict:
+#     total = len(results)
+#     success = sum(1 for r in results if str(r.get("status", "")).upper() == "SUCCESS")
+#     errors = sum(1 for r in results if str(r.get("status", "")).upper() == "ERROR")
+#     warnings = sum(1 for r in results if str(r.get("status", "")).upper() == "WARNING")
+#     lines = [_result_description(r) for r in results]
+#     preview = lines[:8]
+#     if total > len(preview):
+#         preview.append(f"...and {total - len(preview)} more result(s)")
+#     return {
+#         "total": total,
+#         "success": success,
+#         "warnings": warnings,
+#         "errors": errors,
+#         "summary_text": f"{total} item(s) processed: {success} success, {warnings} warning(s), {errors} error(s).",
+#         "detail_lines": preview,
+#     }
+
+
+# def _teams_run_card(agent: str, db_name: str, executed_by: str, results: list) -> dict:
+#     summary = _run_summary(agent, db_name, executed_by, results)
+#     return {
+#         "@type": "MessageCard",
+#         "@context": "https://schema.org/extensions",
+#         "summary": f"{agent} Run — {db_name}",
+#         "themeColor": "00BFFF",
+#         "sections": [{
+#             "activityTitle": f"{agent} — {db_name}",
+#             "activitySubtitle": f"Executed by: {executed_by}",
+#             "facts": [
+#                 {"name": "Total", "value": str(summary["total"])},
+#                 {"name": "Success", "value": str(summary["success"])},
+#                 {"name": "Warnings", "value": str(summary["warnings"])},
+#                 {"name": "Errors", "value": str(summary["errors"])},
+#             ],
+#             "text": "\n".join([f"* {line}" for line in [summary["summary_text"]] + summary["detail_lines"]]),
+#         }],
+#     }
+
+
+# def _slack_run_blocks(agent: str, db_name: str, executed_by: str, results: list) -> dict:
+#     summary = _run_summary(agent, db_name, executed_by, results)
+#     detail_text = "\n".join([f"• {line}" for line in [summary["summary_text"]] + summary["detail_lines"]])
+#     return {
+#         "blocks": [
+#             {"type": "header", "text": {"type": "plain_text", "text": f"{agent} — {db_name}"}},
+#             {"type": "section", "fields": [
+#                 {"type": "mrkdwn", "text": f"*Total:*\n{summary['total']}"},
+#                 {"type": "mrkdwn", "text": f"*Success:*\n{summary['success']}"},
+#                 {"type": "mrkdwn", "text": f"*Warnings:*\n{summary['warnings']}"},
+#                 {"type": "mrkdwn", "text": f"*Errors:*\n{summary['errors']}"},
+#                 {"type": "mrkdwn", "text": f"*Triggered by:*\n{executed_by}"},
+#             ]},
+#             {"type": "divider"},
+#             {"type": "section", "text": {"type": "mrkdwn", "text": detail_text}},
+#         ],
+#     }
+
+
+# def send_run_report(db_config_id: str, agent: str, results: list, executed_by: str = "scheduler"):
+#     from db_config import get_config
+#     cfg = get_config(db_config_id)
+#     if not cfg:
+#         return
+#     notify = cfg.get("notify", {})
+#     if not notify.get("report_after_run", False):
+#         return
+#     db_name = cfg.get("name", db_config_id)
+#     teams_url = notify.get("teams_webhook", "")
+#     slack_url = notify.get("slack_webhook", "")
+#     if teams_url:
+#         _executor.submit(_post, teams_url, _teams_run_card(agent, db_name, executed_by, results))
+#     if slack_url:
+#         _executor.submit(_post, slack_url, _slack_run_blocks(agent, db_name, executed_by, results))
+
+
+# def send_alert(db_config_id: str, agent: str, level: str, message: str):
+#     from db_config import get_config
+#     cfg = get_config(db_config_id)
+#     if not cfg:
+#         return
+#     notify = cfg.get("notify", {})
+#     if level == "ERROR" and not notify.get("on_error", True):
+#         return
+#     if level == "WARNING" and not notify.get("on_warning", True):
+#         return
+#     db_name   = cfg.get("name", db_config_id)
+#     teams_url = notify.get("teams_webhook", "")
+#     slack_url = notify.get("slack_webhook", "")
+#     color = "FF0000" if level == "ERROR" else "FFA500"
+#     teams_payload = {
+#         "@type": "MessageCard", "@context": "https://schema.org/extensions",
+#         "summary":    f"{level}: {agent} — {db_name}",
+#         "themeColor": color,
+#         "sections":   [{"activityTitle": f"{level}: {agent} — {db_name}", "activitySubtitle": message}],
+#     }
+#     slack_payload = {
+#         "blocks": [{"type": "section", "text": {
+#             "type": "mrkdwn",
+#             "text": f"*{level}* — {agent} ({db_name})\n{message}",
+#         }}],
+#     }
+#     if teams_url:
+#         _executor.submit(_post, teams_url, teams_payload)
+#     if slack_url:
+#         _executor.submit(_post, slack_url, slack_payload)
+
+
+# def send_test(cfg: dict, channel: str) -> bool:
+#     notify = cfg.get("notify", {})
+#     db_name = cfg.get("name", "Test")
+#     if channel == "teams":
+#         url = notify.get("teams_webhook", "")
+#         if not url:
+#             return False
+#         payload = {
+#             "@type": "MessageCard",
+#             "summary": f"Tychons Wi-Agents — Test",
+#             "sections": [{"activityTitle": "Tychons Wi-Agents — Test",
+#                           "activitySubtitle": f"Webhook verified for {db_name}"}],
+#         }
+#         return _post(url, payload)
+#     if channel == "slack":
+#         url = notify.get("slack_webhook", "")
+#         if not url:
+#             return False
+#         payload = {"blocks": [{"type": "section", "text": {
+#             "type": "mrkdwn",
+#             "text": f"*Tychons Wi-Agents — Test*\nWebhook verified for {db_name}",
+#         }}]}
+#         return _post(url, payload)
+#     return False
+
+
+########################
+
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -212,7 +392,7 @@ def send_run_report(db_config_id: str, agent: str, results: list, executed_by: s
         _executor.submit(_post, slack_url, _slack_run_blocks(agent, db_name, executed_by, results))
 
 
-def _alert_card_text(agent: str, db_name: str, level: str, message: str) -> tuple:
+def _alert_card_text(agent: str, db_name: str, level: str, message: str) -> tuple[str, str, str]:
     icon = "✗" if level == "ERROR" else "⚠"
     title = f"{icon} {level} — {agent} in {db_name}"
     action_note = (
@@ -239,7 +419,7 @@ def send_alert(db_config_id: str, agent: str, level: str, message: str):
     slack_url = notify.get("slack_webhook", "")
 
     hex_color = "FF0000" if level == "ERROR" else "FFA500"
-    title, body, action_note = _alert_card_text(agent, db_name, level, message)
+    title, body, _ = _alert_card_text(agent, db_name, level, message)
 
     teams_payload = {
         "@type": "MessageCard", "@context": "https://schema.org/extensions",
@@ -251,18 +431,13 @@ def send_alert(db_config_id: str, agent: str, level: str, message: str):
         }],
     }
 
-    icon = ":x:" if level == "ERROR" else ":warning:"
     slack_payload = {
         "attachments": [{
             "color": f"#{hex_color}",
             "blocks": [
                 {"type": "section", "text": {
                     "type": "mrkdwn",
-                    "text": (
-                        f"{icon} *{level}* — *{agent}* in *{db_name}*\n\n"
-                        f"{message}\n\n"
-                        f"_{action_note}_"
-                    ),
+                    "text": f"*{title}*\n\n{body}",
                 }},
             ],
         }]
