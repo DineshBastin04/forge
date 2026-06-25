@@ -903,6 +903,28 @@ def pick_qty():
 @bp.route("/api/v0/unpick_agent/logs", methods=["GET"])
 @require_agent("unpick")
 def unpick_logs():
+    from_dt = request.args.get("from", "").replace("T", " ")
+    to_dt   = request.args.get("to",   "").replace("T", " ")
+    if from_dt or to_dt:
+        try:
+            from auth import _get_conn
+            conds  = ["log_type = ?"]
+            params = ["unpick"]
+            if from_dt: conds.append("timestamp >= ?"); params.append(from_dt)
+            if to_dt:   conds.append("timestamp <= ?"); params.append(to_dt)
+            conn = _get_conn()
+            rows = conn.execute(
+                "SELECT TOP 2000 run_id, timestamp, level, wh_id, order_number, item_number, message "
+                f"FROM job_logs WHERE {' AND '.join(conds)} ORDER BY id DESC",
+                params
+            ).fetchall()
+            conn.close()
+            logs = [{"run_id": r[0], "timestamp": r[1], "level": r[2],
+                     "wh_id": r[3], "order_number": r[4], "item_number": r[5], "message": r[6]}
+                    for r in reversed(rows)]
+            return jsonify({"logs": logs})
+        except Exception as exc:
+            logger.warning("unpick_logs date filter error: %s", exc)
     return jsonify({"logs": get_unpick_logs()})
 
 

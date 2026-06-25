@@ -226,7 +226,18 @@ function app() {
     async drToggle(){try{await this.api('/api/v0/device_reset_agent/scheduler_toggle',{method:'POST'});await this.drLoadScheduler();this.toast('Scheduler updated','success');}catch(e){this.toast(e.message,'error');}},
     async drSetInterval(){const h=parseFloat(this.dr.intervalInput);if(!h||h<.25||h>168){this.toast('Interval must be 0.25–168 hours','error');return;}try{await this.api('/api/v0/device_reset_agent/scheduler_interval',{method:'POST',body:JSON.stringify({hours:h})});this.dr.intervalInput='';await this.drLoadScheduler();this.toast(`Interval set to ${h}h`,'success');}catch(e){this.toast(e.message,'error');}},
     async drManualReset(){const typeLabel=this.dr.manualInputType==='device'?'Device':'Employee';if(!this.dr.manualDbId||!this.dr.manualDeviceId.trim()){this.toast(`Select DB and enter ${typeLabel} ID`,'error');return;}if(!await this.confirmDialog(`Reset ${this.dr.manualInputType==='device'?'device':'employee'} "${this.dr.manualDeviceId.trim()}"? This will clear its assignment and relocate any inventory.`))return;this.dr.manualLoading=true;this.dr.manualResult=null;try{const d=await this.api('/api/v0/device_reset_agent/manual_reset',{method:'POST',body:JSON.stringify({db_config_id:this.dr.manualDbId,device_id:this.dr.manualDeviceId.trim(),input_type:this.dr.manualInputType,reason:this.dr.manualReason})});if(d.type==='warning'){this.dr.manualResult={ok:false,type:'warning',message:d.message};this.toast(d.message,'warning');}else{this.dr.manualResult={ok:true,type:'success',steps:d.steps||[]};this.toast(`${typeLabel} reset successful`,'success');}}catch(e){this.dr.manualResult={ok:false,type:'error',message:e.message};this.toast(e.message,'error');}finally{this.dr.manualLoading=false;}},
-    async drLoadLogs(){this.dr.logsLoading=true;try{const d=await this.api('/api/v0/device_reset_logs');this.dr.logs=d?d.logs:[];}catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}},
+    async drLoadLogs(){
+      this.dr.logsLoading=true;
+      try{
+        let url='/api/v0/device_reset_logs';
+        const p=[];
+        if(this.dr.logFromDate) p.push('from='+encodeURIComponent(this.dr.logFromDate));
+        if(this.dr.logToDate)   p.push('to='+encodeURIComponent(this.dr.logToDate));
+        if(p.length) url+='?'+p.join('&');
+        const d=await this.api(url);
+        this.dr.logs=d?d.logs:[];
+      }catch(e){this.dr.logs=[];}finally{this.dr.logsLoading=false;}
+    },
     drDownloadLogs(fmt) {
       let url = `/api/v0/device_reset_logs/download?format=${fmt}`;
       if (this.dr.logFromDate) url += `&from=${encodeURIComponent(this.dr.logFromDate)}`;
@@ -281,7 +292,18 @@ function app() {
     async upExecuteSelected(){const records=this.up.scanResults.filter(r=>r._selected).map(({_selected,...r})=>r);if(!records.length){this.toast('Select at least one record','error');return;}if(!await this.confirmDialog(`Execute unpick on ${records.length} record(s)? This will modify warehouse inventory records.`))return;this.up.execLoading=true;this.up.execResults=[];try{const d=await this.api('/api/v0/unpick_agent/execute',{method:'POST',body:JSON.stringify({db_config_id:this.up.scanDbId,records})});this.up.execResults=d?.results||[];const ok=this.up.execResults.filter(r=>r.status==='SUCCESS').length;this.toast(`${ok}/${records.length} records processed`,ok===records.length?'success':'warning');}catch(e){this.toast(e.message,'error');}finally{this.up.execLoading=false;}},
     async upManualUnpick(){const{manualDbId:db_config_id,manualWhId:wh_id,manualOrderNum:order_number,manualItemNum:item_number}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number){this.toast('All fields are required','error');return;}this.up.manualLoading=true;this.up.manualResult=null;try{const d=await this.api('/api/v0/unpick_agent/manual_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number})});this.up.manualResult={ok:d.type!=='error',type:d.type||'success',message:d.message};this.toast(d.type==='warning'?d.message:'Manual unpick successful',d.type||'success');}catch(e){this.up.manualResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.manualLoading=false;}},
     async upPartialUnpick(){const{partialDbId:db_config_id,partialWhId:wh_id,partialOrderNum:order_number,partialItemNum:item_number,partialQty}=this.up;if(!db_config_id||!wh_id||!order_number||!item_number||!partialQty){this.toast('All fields are required','error');return;}this.up.partialLoading=true;this.up.partialResult=null;try{const d=await this.api('/api/v0/unpick_agent/partial_unpick',{method:'POST',body:JSON.stringify({db_config_id,wh_id,order_number,item_number,unpick_qty:parseInt(partialQty,10)})});this.up.partialResult={ok:d.type!=='error',type:d.type||'success',message:d.message};this.toast(d.type==='warning'?d.message:'Partial unpick successful',d.type||'success');}catch(e){this.up.partialResult={ok:false,message:e.message};this.toast(e.message,'error');}finally{this.up.partialLoading=false;}},
-    async upLoadLogs(){this.up.logsLoading=true;try{const d=await this.api('/api/v0/unpick_agent/logs');this.up.logs=d?d.logs:[];}catch(e){this.up.logs=[];}finally{this.up.logsLoading=false;}},
+    async upLoadLogs(){
+      this.up.logsLoading=true;
+      try{
+        let url='/api/v0/unpick_agent/logs';
+        const p=[];
+        if(this.up.logFromDate) p.push('from='+encodeURIComponent(this.up.logFromDate));
+        if(this.up.logToDate)   p.push('to='+encodeURIComponent(this.up.logToDate));
+        if(p.length) url+='?'+p.join('&');
+        const d=await this.api(url);
+        this.up.logs=d?d.logs:[];
+      }catch(e){this.up.logs=[];}finally{this.up.logsLoading=false;}
+    },
     upDownloadLogs(fmt) {
       let url = `/api/v0/unpick_agent/logs/download?format=${fmt}`;
       if (this.up.logFromDate) url += `&from=${encodeURIComponent(this.up.logFromDate)}`;
@@ -639,6 +661,8 @@ function app() {
     filteredDrLogs() {
       let logs = this.dr.logs;
       if (this.dr.logLevel) logs = logs.filter(e => e.level === this.dr.logLevel);
+      if (this.dr.logFromDate) { const from = new Date(this.dr.logFromDate); logs = logs.filter(e => new Date(e.timestamp) >= from); }
+      if (this.dr.logToDate)   { const to   = new Date(this.dr.logToDate);   logs = logs.filter(e => new Date(e.timestamp) <= to);   }
       const q = (this.dr.logSearch || '').toLowerCase().trim();
       if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.device_id||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
       return logs;
@@ -646,6 +670,8 @@ function app() {
     filteredUpLogs() {
       let logs = this.up.logs;
       if (this.up.logLevel) logs = logs.filter(e => e.level === this.up.logLevel);
+      if (this.up.logFromDate) { const from = new Date(this.up.logFromDate); logs = logs.filter(e => new Date(e.timestamp) >= from); }
+      if (this.up.logToDate)   { const to   = new Date(this.up.logToDate);   logs = logs.filter(e => new Date(e.timestamp) <= to);   }
       const q = (this.up.logSearch || '').toLowerCase().trim();
       if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.order_number||'').toLowerCase().includes(q) || (e.item_number||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
       return logs;
