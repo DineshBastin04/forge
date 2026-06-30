@@ -257,9 +257,9 @@
           </div>
           <div class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-xs text-slate-500">From:</span>
-            <input x-model="dr.logFromDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
+            <input x-model="dr.logFromDate" type="date" class="input btn-sm text-xs" style="width:11rem">
             <span class="text-xs text-slate-500">to:</span>
-            <input x-model="dr.logToDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
+            <input x-model="dr.logToDate" type="date" class="input btn-sm text-xs" style="width:11rem">
             <span class="text-slate-500 text-sm ml-auto" x-text="filteredDrLogs().length+' / '+dr.logs.length+' entries'"></span>
           </div>
           <div x-show="dr.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>

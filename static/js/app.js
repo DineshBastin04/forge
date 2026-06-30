@@ -231,8 +231,8 @@ function app() {
       try{
         let url='/api/v0/device_reset_logs';
         const p=[];
-        if(this.dr.logFromDate) p.push('from='+encodeURIComponent(this.dr.logFromDate));
-        if(this.dr.logToDate)   p.push('to='+encodeURIComponent(this.dr.logToDate));
+        if(this.dr.logFromDate) p.push('from='+encodeURIComponent(this.dr.logFromDate+' 00:00:00'));
+        if(this.dr.logToDate)   p.push('to='+encodeURIComponent(this.dr.logToDate+' 23:59:59'));
         if(p.length) url+='?'+p.join('&');
         const d=await this.api(url);
         this.dr.logs=d?d.logs:[];
@@ -297,8 +297,8 @@ function app() {
       try{
         let url='/api/v0/unpick_agent/logs';
         const p=[];
-        if(this.up.logFromDate) p.push('from='+encodeURIComponent(this.up.logFromDate));
-        if(this.up.logToDate)   p.push('to='+encodeURIComponent(this.up.logToDate));
+        if(this.up.logFromDate) p.push('from='+encodeURIComponent(this.up.logFromDate+' 00:00:00'));
+        if(this.up.logToDate)   p.push('to='+encodeURIComponent(this.up.logToDate+' 23:59:59'));
         if(p.length) url+='?'+p.join('&');
         const d=await this.api(url);
         this.up.logs=d?d.logs:[];
@@ -639,7 +639,7 @@ function app() {
     },
     relTime(ts) {
       if (!ts) return '—';
-      const diff = Math.round((Date.now() - new Date(ts).getTime()) / 1000);
+      const diff = Math.round((Date.now() - this._tsDate(ts).getTime()) / 1000);
       if (isNaN(diff)) return ts;
       if (diff < 0) { const abs = Math.abs(diff); if (abs < 60) return 'in a moment'; if (abs < 3600) return `in ${Math.floor(abs/60)}m`; if (abs < 86400) return `in ${Math.floor(abs/3600)}h`; return `in ${Math.floor(abs/86400)}d`; }
       if (diff < 60) return 'just now';
@@ -658,23 +658,27 @@ function app() {
       const map = [{label:'Weak',barColor:'bg-red-400',textColor:'text-red-500'},{label:'Fair',barColor:'bg-amber-400',textColor:'text-amber-600'},{label:'Good',barColor:'bg-lime-500',textColor:'text-lime-600'},{label:'Strong',barColor:'bg-emerald-500',textColor:'text-emerald-600'}];
       return {score:Math.max(1,s), ...(map[Math.max(0,s-1)])};
     },
+    _tsDate(ts) {
+      // Normalize 'YYYY-MM-DD HH:MM:SS UTC' → ISO string Firefox can parse
+      return new Date((ts||'').replace(' UTC','Z').replace(' ','T'));
+    },
     filteredDrLogs() {
       let logs = this.dr.logs;
       if (this.dr.logLevel) logs = logs.filter(e => e.level === this.dr.logLevel);
-      if (this.dr.logFromDate) { const from = new Date(this.dr.logFromDate); logs = logs.filter(e => new Date(e.timestamp) >= from); }
-      if (this.dr.logToDate)   { const to   = new Date(this.dr.logToDate);   logs = logs.filter(e => new Date(e.timestamp) <= to);   }
+      if (this.dr.logFromDate) { const from = new Date(this.dr.logFromDate + 'T00:00:00'); logs = logs.filter(e => this._tsDate(e.timestamp) >= from); }
+      if (this.dr.logToDate)   { const to   = new Date(this.dr.logToDate   + 'T23:59:59'); logs = logs.filter(e => this._tsDate(e.timestamp) <= to);   }
       const q = (this.dr.logSearch || '').toLowerCase().trim();
       if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.device_id||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
-      return logs;
+      return logs.slice().sort((a, b) => this._tsDate(b.timestamp) - this._tsDate(a.timestamp));
     },
     filteredUpLogs() {
       let logs = this.up.logs;
       if (this.up.logLevel) logs = logs.filter(e => e.level === this.up.logLevel);
-      if (this.up.logFromDate) { const from = new Date(this.up.logFromDate); logs = logs.filter(e => new Date(e.timestamp) >= from); }
-      if (this.up.logToDate)   { const to   = new Date(this.up.logToDate);   logs = logs.filter(e => new Date(e.timestamp) <= to);   }
+      if (this.up.logFromDate) { const from = new Date(this.up.logFromDate + 'T00:00:00'); logs = logs.filter(e => this._tsDate(e.timestamp) >= from); }
+      if (this.up.logToDate)   { const to   = new Date(this.up.logToDate   + 'T23:59:59'); logs = logs.filter(e => this._tsDate(e.timestamp) <= to);   }
       const q = (this.up.logSearch || '').toLowerCase().trim();
       if (q) logs = logs.filter(e => (e.message||'').toLowerCase().includes(q) || (e.order_number||'').toLowerCase().includes(q) || (e.item_number||'').toLowerCase().includes(q) || (e.run_id||'').toLowerCase().includes(q));
-      return logs;
+      return logs.slice().sort((a, b) => this._tsDate(b.timestamp) - this._tsDate(a.timestamp));
     },
     levelBadge(l){return({INFO:'bg-blue-100 text-blue-700',WARNING:'bg-amber-100 text-amber-700',ERROR:'bg-red-100 text-red-700',SUCCESS:'bg-emerald-100 text-emerald-700'})[l]||'bg-slate-100 text-slate-600';},
     statusBadge(s){return({SUCCESS:'bg-emerald-100 text-emerald-700',WARNING:'bg-amber-100 text-amber-700',ERROR:'bg-red-100 text-red-700'})[s]||'bg-slate-100 text-slate-600';},

@@ -199,9 +199,9 @@
           </div>
           <div class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-xs text-slate-500">From:</span>
-            <input x-model="up.logFromDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
+            <input x-model="up.logFromDate" type="date" class="input btn-sm text-xs" style="width:11rem">
             <span class="text-xs text-slate-500">to:</span>
-            <input x-model="up.logToDate" type="datetime-local" class="input btn-sm text-xs" style="width:16rem">
+            <input x-model="up.logToDate" type="date" class="input btn-sm text-xs" style="width:11rem">
             <span class="text-slate-500 text-sm ml-auto" x-text="filteredUpLogs().length+' / '+up.logs.length+' entries'"></span>
           </div>
           <div x-show="up.logsLoading" class="text-slate-500 text-sm p-4">Loading…</div>
